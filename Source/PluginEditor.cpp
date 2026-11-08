@@ -343,6 +343,42 @@ void ScopeComponent::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+void CameraView::paint (juce::Graphics& g)
+{
+    auto r = getLocalBounds().toFloat();
+    g.setColour (juce::Colour (0xff0a0a0a));
+    g.fillRoundedRectangle (r, 6.0f);
+    auto screen = r.reduced (5.0f);
+    g.setColour (juce::Colour (0xff050806));
+    g.fillRoundedRectangle (screen, 8.0f);
+
+    auto img = proc.camera.getPreview();
+    if (img.isValid())
+    {
+        g.setImageResamplingQuality (juce::Graphics::lowResamplingQuality);
+        g.drawImage (img, screen.reduced (2.0f));
+        // Hand position crosshair
+        const float hx = proc.monitor[dw::O_CAM_X].load(), hy = proc.monitor[dw::O_CAM_Y].load();
+        const float px = screen.getCentreX() + hx * screen.getWidth() * 0.5f;
+        const float py = screen.getCentreY() - hy * screen.getHeight() * 0.5f;
+        const float m = proc.monitor[dw::O_CAM_MOTION].load();
+        g.setColour (juce::Colour (0xff8dffb4).withAlpha (0.4f + 0.6f * m));
+        g.drawEllipse (px - 7, py - 7, 14, 14, 1.5f);
+        g.drawLine (px - 11, py, px + 11, py, 1.0f);
+        g.drawLine (px, py - 11, px, py + 11, 1.0f);
+    }
+    else
+    {
+        g.setColour (juce::Colour (0xffffb43a).withAlpha (0.8f));
+        g.setFont (juce::Font (juce::FontOptions (juce::Font::getDefaultMonospacedFontName(), 10.0f, juce::Font::bold)));
+        g.drawFittedText (proc.camera.status, screen.reduced (6.0f).toNearestInt(), juce::Justification::centred, 3);
+    }
+    g.setColour (juce::Colours::black.withAlpha (0.2f));
+    for (float y = screen.getY(); y < screen.getBottom(); y += 3.0f)
+        g.drawHorizontalLine ((int) y, screen.getX(), screen.getRight());
+}
+
+//==============================================================================
 DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p)
     : AudioProcessorEditor (&p), proc (p)
 {
@@ -370,6 +406,8 @@ DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p)
         { M_NOISE,  "NOISE", "S&H", 0, 800, 100, 1, false, grey, { { "nz.slew", "SLEW", 0 } } },
         { M_LFO1,   "LFO 1", "SLOW", 0, 900, 100, 1, false, blue, { { "lfo1.rate", "RATE", 0 }, { "lfo1.shape", "SHAPE", 1 } } },
         { M_LFO2,   "LFO 2", "SLOW", 0, 1000, 100, 1, false, blue, { { "lfo2.rate", "RATE", 0 }, { "lfo2.shape", "SHAPE", 1 } } },
+        { M_CAMERA, "MONITOR / CAMERA", "SCOPE + HAND TRACKING", 0, 1100, 260, 1, true, yellow,
+          { { "cam.on", "CAM ON", 2, 150, 146 }, { "cam.sens", "SENS", 0, 202, 146 }, { "cam.slew", "SMOOTH", 0, 176, 210 } } },
         { M_ENV1,   "ENV 1", "ADSR", 1, 0, 130, 2, false, blue,
           { { "env1.a", "ATTACK", 0 }, { "env1.d", "DECAY", 0 }, { "env1.s", "SUSTAIN", 0 }, { "env1.r", "RELEASE", 0 } } },
         { M_ENV2,   "ENV 2", "ADSR", 1, 130, 130, 2, false, blue,
@@ -409,11 +447,14 @@ DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p)
         buildModule (s);
 
     const int row0 = headerH + railH;
-    scopeRect = { 1100 + 14, row0 + 92, 260 - 28, 170 };
-    logoRect = { 1100, row0, 260, rowH };
+    scopeRect = { 1100 + 10, row0 + 40, 240, 100 };
+    cameraRect = { 1100 + 10, row0 + 148, 136, 104 };
     scope = std::make_unique<ScopeComponent> (proc);
     scope->setBounds (scopeRect);
     addAndMakeVisible (*scope);
+    cameraView = std::make_unique<CameraView> (proc);
+    cameraView->setBounds (cameraRect);
+    addAndMakeVisible (*cameraView);
 
     // Header controls
     for (int i = 0; i < proc.getNumPrograms(); ++i)
@@ -470,7 +511,8 @@ void DriftwerkEditor::buildModule (int specIndex)
     {
         const auto& cd = sp.controls[(size_t) c];
         const int col = c % sp.cols, row = c / sp.cols;
-        const juce::Rectangle<int> cell (sp.x + 6 + col * cellW, y0 + row * cellH, cellW, cellH);
+        const juce::Rectangle<int> cell = cd.rx >= 0 ? juce::Rectangle<int> (sp.x + cd.rx, top + cd.ry, 52, cellH)
+                                                     : juce::Rectangle<int> (sp.x + 6 + col * cellW, y0 + row * cellH, cellW, cellH);
 
         if (cd.kind == 0)
         {
@@ -640,37 +682,6 @@ void DriftwerkEditor::paint (juce::Graphics& g)
         g.fillRoundedRectangle (outputPlates[i].toFloat(), 4.0f);
     }
 
-    // Scope / logo module
-    {
-        const auto r = logoRect.toFloat().reduced (1.0f, 0.0f);
-        g.setColour (panelBlack);
-        g.fillRect (r);
-        g.setColour (juce::Colours::black);
-        g.drawRect (r, 1.0f);
-        g.setColour (inkLight);
-        g.setFont (panelFont (14.0f).withExtraKerningFactor (0.08f));
-        g.drawText ("MONITOR", (int) r.getX(), (int) r.getY() + 6, (int) r.getWidth(), 16, juce::Justification::centred);
-        g.setColour (juce::Colour (0xffc8352e));
-        g.fillRect (r.getX() + 6, r.getY() + 32, r.getWidth() - 12, 2.0f);
-        g.setColour (inkLight.withAlpha (0.65f));
-        g.setFont (panelFont (8.5f, false));
-        g.drawText ("OUTPUT SCOPE", (int) r.getX(), (int) r.getY() + 20, (int) r.getWidth(), 11, juce::Justification::centred);
-
-        g.setColour (inkLight);
-        g.setFont (panelFont (30.0f).withExtraKerningFactor (0.18f));
-        g.drawText ("DRIFT", (int) r.getX(), (int) r.getY() + 46, (int) r.getWidth(), 34, juce::Justification::centred);
-        g.setColour (juce::Colour (0xffffb43a));
-        g.setFont (panelFont (12.0f).withExtraKerningFactor (0.5f));
-        g.drawText ("W E R K   9 4", (int) r.getX(), (int) r.getY() + 272, (int) r.getWidth(), 18, juce::Justification::centred);
-        g.setColour (inkLight.withAlpha (0.5f));
-        g.setFont (panelFont (9.0f, false));
-        g.drawText ("SLOW MUSIC FOR LONG NIGHTS", (int) r.getX(), (int) r.getY() + 292, (int) r.getWidth(), 14, juce::Justification::centred);
-        drawScrew (g, { r.getX() + 8.0f, r.getY() + 8.0f });
-        drawScrew (g, { r.getRight() - 8.0f, r.getY() + 8.0f });
-        drawScrew (g, { r.getX() + 8.0f, r.getBottom() - 6.0f });
-        drawScrew (g, { r.getRight() - 8.0f, r.getBottom() - 6.0f });
-    }
-
     // Labels
     for (auto& l : labels)
     {
@@ -807,6 +818,7 @@ void DriftwerkEditor::timerCallback()
     }
 
     scope->repaint();
+    cameraView->repaint();
     repaint (arpLedArea.expanded (8));
     for (auto& r : moduleLedAreas)
         if (! r.isEmpty()) repaint (r.expanded (10));

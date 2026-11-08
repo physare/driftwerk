@@ -59,6 +59,14 @@ public:
     DriftwerkProcessor& proc;
 };
 
+class CameraView : public juce::Component
+{
+public:
+    explicit CameraView (DriftwerkProcessor& p) : proc (p) {}
+    void paint (juce::Graphics&) override;
+    DriftwerkProcessor& proc;
+};
+
 //==============================================================================
 class DriftwerkEditor : public juce::AudioProcessorEditor, private juce::Timer
 {
@@ -87,7 +95,7 @@ private:
     void buildModule (int specIndex);
     void refreshPatch();
 
-    struct ControlDef { const char* param; const char* label; int kind; }; // 0 knob, 1 combo, 2 toggle
+    struct ControlDef { const char* param; const char* label; int kind; int rx = -1, ry = -1; }; // 0 knob, 1 combo, 2 toggle; rx/ry = fixed cell offset
     struct ModuleSpec
     {
         int module; const char* title; const char* subtitle;
@@ -112,9 +120,10 @@ private:
     std::vector<std::unique_ptr<JackComponent>> outJacks, inJacks;
     std::unique_ptr<CableLayer> cables;
     std::unique_ptr<ScopeComponent> scope;
+    std::unique_ptr<CameraView> cameraView;
     juce::Rectangle<int> arpLedArea;
     std::array<juce::Rectangle<int>, 4> moduleLedAreas; // LFO1, LFO2, ENV1, ENV2 activity LEDs
-    juce::Rectangle<int> scopeRect, logoRect;
+    juce::Rectangle<int> scopeRect, cameraRect;
 
     juce::ComboBox presetBox;
     juce::TextButton randomButton { "RANDOM PATCH" }, clearButton { "PULL ALL" }, dimButton { "DIM CABLES" };

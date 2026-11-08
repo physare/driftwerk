@@ -17,6 +17,7 @@ The interface is a 90s-style modular rack with real drag-and-drop patch cables.
 | Bottom | ENV 1 / ENV 2 | ADSR envelopes triggered from a GATE input. |
 | Bottom | MIXER, VCF 1/2, VCA 1/2 | 4-input mixer, 24 dB ladder filters with two CV inputs, linear VCAs. |
 | Bottom | OUTPUT | Two inputs with level and pan, string ensemble, master volume. |
+| Top | MONITOR / CAMERA | Output scope, plus webcam hand tracking. Turn CAM ON and patch HAND X, HAND Y (both -1..+1), MOTION (0..1) and TRIG (a gate on each sudden gesture) to anything. SENS sets how much movement counts, SMOOTH slows the outputs down. Windows and Mac only. |
 | Bottom | TAPE ECHO / HALL | Tempo-synced ping-pong tape echo with wow, and a long FDN hall (tails up to ~40 s). |
 
 ## Patching
@@ -30,7 +31,7 @@ The interface is a 90s-style modular rack with real drag-and-drop patch cables.
 
 ## Presets
 
-Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine.
+Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine, Hand Weather (camera: hand height sweeps the sequence filter, left/right sweeps the drone, a quick wave opens it up).
 
 ## Building
 

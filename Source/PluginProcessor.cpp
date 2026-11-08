@@ -77,6 +77,13 @@ const std::vector<Preset>& presets()
           { { "clk.div", 4 }, { "arp.scale", 2 }, { "arp.range", 3 }, { "arp.mutate", 0.25f },
             { "vco2.oct", 1 }, { "vcf1.cv2", 0.35f }, { "nz.slew", 0.1f }, { "echo.div", 1 },
             { "drn.level", 0.45f }, { "env1.d", 0.18f } } },
+        { "Hand Weather (camera)",
+          "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.saw>mix.in1;vco2.pls>mix.in2;"
+          "mix.out>vcf1.in;arp.gate>env1.gate;env1.out>vcf1.cv1;env1.out>vca1.cv;cam.y>vcf1.cv2;"
+          "lfo2.out>vco2.pwm;vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;cam.x>vcf2.cv1;"
+          "cam.trig>env2.gate;env2.out>vcf2.cv2;vcf2.out>out.in2",
+          { { "cam.on", 1 }, { "vcf1.cv2", 0.6f }, { "vcf2.cv1", 0.55f }, { "vcf2.cv2", 0.5f },
+            { "env2.a", 0.05f }, { "env2.d", 2.5f }, { "env2.s", 0.0f }, { "env2.r", 3.0f } } },
     };
     return list;
 }
@@ -186,6 +193,10 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("hall.size", "Hall Size", NRange (0.0f, 1.0f), 0.78f);
     fl ("hall.damp", "Hall Damping", NRange (0.0f, 1.0f), 0.45f);
     fl ("hall.mix", "Hall Mix", NRange (0.0f, 1.0f), 0.42f);
+    // Camera
+    bo ("cam.on", "Camera On", false);
+    fl ("cam.sens", "Camera Sensitivity", NRange (0.0f, 1.0f), 0.5f);
+    fl ("cam.slew", "Camera Smoothing", NRange (0.0f, 1.0f), 0.3f);
 
     return { ps.begin(), ps.end() };
 }
@@ -206,6 +217,26 @@ DriftwerkProcessor::DriftwerkProcessor()
     }
     for (int i = 0; i < 6; ++i)
         droneOsc[i].phase = (droneRng.next() * 0.5 + 0.5);
+
+    cameraPoller = std::make_unique<CameraPoller> (*this);
+}
+
+DriftwerkProcessor::~DriftwerkProcessor()
+{
+    cameraPoller = nullptr;
+    camera.close();
+}
+
+void DriftwerkProcessor::CameraPoller::timerCallback()
+{
+    const bool want = owner.apvts.getRawParameterValue ("cam.on")->load() > 0.5f;
+    owner.camera.sensitivity.store (owner.apvts.getRawParameterValue ("cam.sens")->load());
+    if (want && ! owner.camera.isOpen())
+    {
+        startTimer (owner.camera.open() ? 250 : 3000); // retry slowly if busy or missing
+    }
+    else if (! want && owner.camera.isOpen())
+        owner.camera.close();
 }
 
 bool DriftwerkProcessor::isBusesLayoutSupported (const BusesLayout& layouts) const
@@ -350,6 +381,7 @@ void DriftwerkProcessor::updateBlockParams()
     const int ed = i ("echo.div");
     p.echoTime = echoDivBeats[ed] > 0.0 ? (float) (echoDivBeats[ed] * samplesPerBeat / sr) : f ("echo.ms") * 0.001f;
     p.echoTime = juce::jlimit (0.02f, 2.4f, p.echoTime);
+    p.camSlew = f ("cam.slew");
     p.revSize = f ("hall.size"); p.revDamp = f ("hall.damp"); p.revMix = f ("hall.mix");
 
     env1.set (p.e1a, p.e1d, p.e1s, p.e1r, (float) sr);
@@ -492,6 +524,21 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     // ---- VCAs
     outs[O_VCA1] = in (I_VCA1_IN) * clampf (p.a1Gain + in (I_VCA1_CV) * p.a1Cv, 0.0f, 1.5f);
     outs[O_VCA2] = in (I_VCA2_IN) * clampf (p.a2Gain + in (I_VCA2_CV) * p.a2Cv, 0.0f, 1.5f);
+
+    // ---- CAMERA
+    {
+        const float coef = onePoleCoef (0.01f + p.camSlew * p.camSlew * 1.2f, fsr);
+        camX += (camera.handX.load (std::memory_order_relaxed) - camX) * coef;
+        camY += (camera.handY.load (std::memory_order_relaxed) - camY) * coef;
+        camMot += (camera.motion.load (std::memory_order_relaxed) - camMot) * coef;
+        const int tc = camera.triggerCount.load (std::memory_order_relaxed);
+        if (tc != camTrigSeen) { camTrigSeen = tc; camTrigLeft = (int) (sr * 0.03); }
+        if (camTrigLeft > 0) --camTrigLeft;
+        outs[O_CAM_X] = camX;
+        outs[O_CAM_Y] = camY;
+        outs[O_CAM_MOTION] = camMot;
+        outs[O_CAM_TRIG] = camTrigLeft > 0 ? 1.0f : 0.0f;
+    }
 
     // ---- OUTPUT + SPACE
     const float s1 = in (I_OUT1) * p.lvl1;

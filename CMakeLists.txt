@@ -41,11 +41,13 @@ target_compile_definitions(Driftwerk PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
-    JUCE_DISPLAY_SPLASH_SCREEN=0)
+    JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_USE_CAMERA=$<IF:$<PLATFORM_ID:Linux>,0,1>)
 
 target_link_libraries(Driftwerk
     PRIVATE
         juce::juce_audio_utils
+        juce::juce_video
         juce::juce_dsp
     PUBLIC
         juce::juce_recommended_config_flags
@@ -57,7 +59,7 @@ option(DRIFTWERK_BUILD_TOOLS "Build the offline render test tool" OFF)
 if(DRIFTWERK_BUILD_TOOLS)
     juce_add_console_app(DriftwerkRender PRODUCT_NAME "DriftwerkRender")
     target_sources(DriftwerkRender PRIVATE tools/Render.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
-    target_compile_definitions(DriftwerkRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
-    target_link_libraries(DriftwerkRender PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_dsp
+    target_compile_definitions(DriftwerkRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_CAMERA=0)
+    target_link_libraries(DriftwerkRender PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_video juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags)
 endif()

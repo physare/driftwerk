@@ -11,6 +11,31 @@ int main (int argc, char** argv)
     const double seconds = argc > 3 ? juce::String (argv[3]).getDoubleValue() : 30.0;
 
     DriftwerkProcessor proc;
+
+    // Camera tracker self-test: a bright square moving left to right, then a burst of motion.
+    {
+        CameraTracker t;
+        for (int f = 0; f < 12; ++f)
+        {
+            juce::Image frame (juce::Image::RGB, 320, 240, true);
+            juce::Graphics g (frame);
+            g.fillAll (juce::Colours::black);
+            g.setColour (juce::Colours::white);
+            g.fillRect (20 + f * 22, 150 - f * 8, 50, 50);
+            t.analyse (frame);
+            std::printf ("cam frame %2d  x %+.2f  y %+.2f  motion %.2f  trig %d\n", f, t.handX.load(), t.handY.load(), t.motion.load(), t.triggerCount.load());
+        }
+        // Feed the same square to the processor's tracker so the editor preview shows something.
+        for (int f = 0; f < 2; ++f)
+        {
+            juce::Image frame (juce::Image::RGB, 320, 240, true);
+            juce::Graphics g (frame);
+            g.fillAll (juce::Colour (40, 44, 40));
+            g.setColour (juce::Colours::white);
+            g.fillEllipse (60.0f + f * 30.0f, 70.0f, 70.0f, 90.0f);
+            proc.camera.analyse (frame);
+        }
+    }
     proc.setCurrentProgram (program);
     const double sr = 48000.0;
     const int block = 512;

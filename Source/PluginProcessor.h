@@ -4,12 +4,13 @@
 #include <atomic>
 #include "DSP.h"
 #include "Patch.h"
+#include "CameraTracker.h"
 
 class DriftwerkProcessor : public juce::AudioProcessor
 {
 public:
     DriftwerkProcessor();
-    ~DriftwerkProcessor() override = default;
+    ~DriftwerkProcessor() override;
 
     void prepareToPlay (double sampleRate, int samplesPerBlock) override;
     void releaseResources() override {}
@@ -51,6 +52,7 @@ public:
     std::array<std::atomic<float>, dw::NumOuts> monitor;
     std::atomic<int> arpStep { 0 };
     std::atomic<int> arpLength { 16 };
+    CameraTracker camera;
     static constexpr int scopeSize = 1024;
     float scope[scopeSize] {};
     std::atomic<int> scopeWrite { 0 };
@@ -113,6 +115,16 @@ private:
     bool env1LastGate = false, env2LastGate = false;
     // Filters
     dw::Ladder vcf1, vcf2;
+    // Camera
+    float camX = 0, camY = 0, camMot = 0;
+    int camTrigSeen = 0, camTrigLeft = 0;
+    struct CameraPoller : juce::Timer
+    {
+        DriftwerkProcessor& owner;
+        explicit CameraPoller (DriftwerkProcessor& o) : owner (o) { startTimer (250); }
+        void timerCallback() override;
+    };
+    std::unique_ptr<CameraPoller> cameraPoller;
     // FX
     dw::Ensemble ensemble;
     dw::TapeEcho echo;
@@ -137,6 +149,7 @@ private:
         float lvl1 = 0.7f, lvl2 = 0.6f, pan1 = 0, pan2 = 0, vol = 0.5f, ens = 0.4f;
         float echoTime = 0.3f, echoFb = 0.5f, echoMix = 0.3f, echoWow = 0.3f;
         float revSize = 0.75f, revDamp = 0.5f, revMix = 0.4f;
+        float camSlew = 0.3f;
     } p;
 
     double sr = 44100.0;
