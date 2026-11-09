@@ -8,7 +8,29 @@ $log     = Join-Path $home_ 'update.log'
 New-Item -ItemType Directory -Force $home_ | Out-Null
 function Log($m) { "$(Get-Date -Format s)  $m" | Add-Content $log }
 
+# Desktop and Start menu shortcuts for the Timewind app. Made once: delete them and they stay gone.
+function Make-Shortcuts {
+    try {
+        $exe  = Join-Path $home_ 'Timewind.exe'
+        $done = Join-Path $home_ 'shortcuts.done'
+        if (-not (Test-Path $exe) -or (Test-Path $done)) { return }
+        $shell = New-Object -ComObject WScript.Shell
+        foreach ($dir in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) {
+            if (-not $dir) { continue }
+            $lnk = $shell.CreateShortcut((Join-Path $dir 'Timewind.lnk'))
+            $lnk.TargetPath = $exe
+            $lnk.WorkingDirectory = $home_
+            $lnk.IconLocation = "$exe,0"
+            $lnk.Description = 'Timewind'
+            $lnk.Save()
+        }
+        Set-Content $done 'yes'
+        Log 'Made the Desktop and Start menu shortcuts'
+    } catch { Log "Shortcuts failed: $_" }
+}
+
 try {
+    Make-Shortcuts
     if (Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue) { Log 'Ableton is running, will try later'; exit 0 }
 
     $tmp = Join-Path $env:TEMP ('timewind-' + [guid]::NewGuid())
@@ -35,6 +57,7 @@ try {
     Set-Content -NoNewline $current $remote
     Remove-Item -Recurse -Force $tmp
     Log "Updated to $remote"
+    Make-Shortcuts
 } catch {
     Log "Update failed: $_"
     exit 1

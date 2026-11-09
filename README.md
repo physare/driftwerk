@@ -132,6 +132,8 @@ powershell -ExecutionPolicy Bypass -File tools\windows\install-timewind.ps1
 This installs Timewind, links it into `C:\Program Files\Common Files\VST3`, and adds a "Timewind Updater"
 scheduled task that checks every 30 minutes and at logon. It waits while Ableton is open, since Windows locks
 plugins that are in use, so new builds land the next time Ableton is closed. Log: `%LOCALAPPDATA%\Timewind\update.log`.
+It also puts a **Timewind** shortcut for the standalone app on your Desktop and in the Start menu (once; if you delete
+them they stay deleted).
 
 ## Installing in Ableton manually (Windows)
 
