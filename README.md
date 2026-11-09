@@ -52,7 +52,21 @@ cmake -B build
 cmake --build build --config Release --target Driftwerk_VST3
 ```
 
-## Installing in Ableton (Windows)
+## Automatic updates (Windows)
+
+Every push to `main` builds the plugin and publishes it as the `latest` GitHub release.
+To have your PC install new builds by itself, open PowerShell **as Administrator** in this repo and run:
+
+```
+gh auth login   # only if the GitHub CLI isn't signed in yet
+powershell -ExecutionPolicy Bypass -File tools\windows\install-driftwerk.ps1
+```
+
+This installs Driftwerk, links it into `C:\Program Files\Common Files\VST3`, and adds a "Driftwerk Updater"
+scheduled task that checks every 30 minutes and at logon. It waits while Ableton is open, since Windows locks
+plugins that are in use, so new builds land the next time Ableton is closed. Log: `%LOCALAPPDATA%\Driftwerk\update.log`.
+
+## Installing in Ableton manually (Windows)
 
 1. Copy `Driftwerk.vst3` to `C:\Program Files\Common Files\VST3\`.
 2. In Ableton: Options > Preferences > Plug-Ins, turn on "Use VST3 Plug-In System Folders", then Rescan.

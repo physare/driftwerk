@@ -4,6 +4,9 @@ on:
   push:
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   windows:
     runs-on: windows-latest
@@ -19,7 +22,19 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item -Recurse build/Driftwerk_artefacts/Release/VST3/Driftwerk.vst3 dist/
           Copy-Item build/Driftwerk_artefacts/Release/Standalone/Driftwerk.exe dist/
+          Set-Content -NoNewline -Path version.txt -Value "$env:GITHUB_SHA"
+          Compress-Archive -Path dist/* -DestinationPath Driftwerk-Windows.zip
       - uses: actions/upload-artifact@v4
         with:
           name: Driftwerk-Windows
           path: dist
+      # Rolling "latest" release that the Windows auto-updater pulls from.
+      - name: Publish latest release
+        if: github.ref == 'refs/heads/main'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete latest --cleanup-tag --yes 2>$null
+          $msg = (git log -1 --pretty=%s)
+          gh release create latest Driftwerk-Windows.zip version.txt --target $env:GITHUB_SHA --title "Latest build" --notes "Built from $env:GITHUB_SHA`n`n$msg" --prerelease
