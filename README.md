@@ -71,6 +71,8 @@ The panel over the slime mold has five tabs:
 * **HARMONY**: chord progressions. PEACEFUL, DREAMY and DRIFTING move pads, drone and arp together through chords that stay in key, every 1 to 16 bars. CREEPY slides between outside chords. CHORD GLIDE sets how slowly they slide. NEW SCENE KEY decides whether a new scene keeps the key, moves to a nearby key or jumps anywhere.
 * **ORGANISM**: just the slime mold.
 
+**FULL SCREEN** (or F11) fills your screen with Timewind; click it again or press Esc to go back. **CAMERA** opens the full-screen camera stage.
+
 **REC** in the header records everything Timewind plays to a WAV file in Music\Timewind. **RECORDINGS** opens that folder.
 
 ## Random Arp

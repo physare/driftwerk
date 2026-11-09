@@ -223,6 +223,7 @@ public:
     void refreshNow() { timerCallback(); } // used by the offline render tool
     void showFullCamera() { openFullCamera (true); } // used by the offline render tool
     void showPerformTab (int t);
+    void setFullScreenLabel (bool isFull);
     void advanceSlime (int steps) { for (int i = 0; i < steps; ++i) slime->advance(); }
 
     DriftwerkProcessor& proc;
@@ -271,8 +272,8 @@ private:
     std::unique_ptr<FullCameraView> fullCam;
     std::unique_ptr<PerformPanel> perform;
     friend class PerformPanel;
-    juce::TextButton recordButton { "REC" }, filesButton { "RECORDINGS" };
-    juce::TextButton fullButton { "FULL SCREEN CAMERA" };
+    juce::TextButton recordButton { "REC" }, filesButton { "RECORDINGS" }, screenButton { "FULL SCREEN" };
+    juce::TextButton fullButton { "CAMERA" };
     void openFullCamera (bool open);
     juce::Rectangle<int> arpLedArea, slimeRect, playRect;
     std::array<juce::Rectangle<int>, 4> moduleLedAreas;
@@ -296,5 +297,12 @@ public:
     void resized() override;
     void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
     void refreshNow() { view.refreshNow(); }
+    bool keyPressed (const juce::KeyPress& k) override;
+    void toggleFullScreen();
+    bool isFull() const { return full; }
     MainView view;
+
+private:
+    bool full = false;
+    juce::Rectangle<int> normalBounds;
 };

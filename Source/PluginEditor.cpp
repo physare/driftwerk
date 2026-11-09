@@ -806,6 +806,11 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     };
     addAndMakeVisible (recordButton);
     addAndMakeVisible (filesButton);
+    screenButton.onClick = [this]
+    {
+        if (auto* ed = findParentComponentOfClass<DriftwerkEditor>()) ed->toggleFullScreen();
+    };
+    addAndMakeVisible (screenButton);
     fullButton.onClick = [this] { openFullCamera (true); };
     fullButton.getProperties().set ("accent", true);
     addAndMakeVisible (fullButton);
@@ -1020,6 +1025,7 @@ void MainView::paint (juce::Graphics& g)
 }
 
 void MainView::showPerformTab (int t) { perform->setTab (t); }
+void MainView::setFullScreenLabel (bool isFull) { screenButton.setButtonText (isFull ? "EXIT FULL" : "FULL SCREEN"); }
 
 void MainView::openFullCamera (bool open)
 {
@@ -1031,9 +1037,10 @@ void MainView::resized()
 {
     cables->setBounds (getLocalBounds());
     fullCam->setBounds (getLocalBounds());
-    fullButton.setBounds (getWidth() - 780, 14, 170, 26);
-    recordButton.setBounds (getWidth() - 958, 14, 86, 26);
-    filesButton.setBounds (getWidth() - 868, 14, 84, 26);
+    recordButton.setBounds (getWidth() - 958, 14, 76, 26);
+    filesButton.setBounds (getWidth() - 878, 14, 88, 26);
+    screenButton.setBounds (getWidth() - 786, 14, 98, 26);
+    fullButton.setBounds (getWidth() - 684, 14, 76, 26);
     presetBox.setBounds (getWidth() - 600, 14, 200, 26);
     randomButton.setBounds (getWidth() - 390, 14, 130, 26);
     clearButton.setBounds (getWidth() - 252, 14, 100, 26);
@@ -1390,7 +1397,7 @@ void PerformPanel::paint (juce::Graphics& g)
     g.setColour (juce::Colours::black.withAlpha (0.74f));
     g.fillRect (getLocalBounds());
     g.setColour (juce::Colours::black.withAlpha (0.9f));           // keep the slime's own captions out of the way
-    g.fillRect (getLocalBounds().removeFromTop (34));
+    g.fillRect (getLocalBounds().removeFromTop (38));
     g.fillRect (getLocalBounds().removeFromBottom (28));
     g.setColour (rule);
     g.drawRect (getLocalBounds(), 1);
@@ -1492,6 +1499,46 @@ DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p) : AudioProcessorEditor 
     }
     fit = juce::jmax (fit, 0.4);
     setSize ((int) (MainView::designW * fit), (int) (MainView::designH * fit));
+}
+
+// FULL SCREEN: the standalone app goes truly full screen; inside a host (Ableton) the plugin
+// window grows to fill the screen. Click again, or press Esc / F11, to go back.
+void DriftwerkEditor::toggleFullScreen()
+{
+    auto* top = getTopLevelComponent();
+    const bool standalone = processor.wrapperType == juce::AudioProcessor::wrapperType_Standalone;
+    if (! full)
+    {
+        normalBounds = getBounds();
+        if (standalone && top != nullptr && top != this)
+            juce::Desktop::getInstance().setKioskModeComponent (top, false);
+        else if (auto* d = juce::Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+        {
+            // Leave room for the host's window title bar; keep the rack's shape.
+            const auto area = d->userArea;
+            const double fit = juce::jmin (area.getWidth() / (double) MainView::designW,
+                                           (area.getHeight() - 34) / (double) MainView::designH);
+            setSize ((int) (MainView::designW * fit), (int) (MainView::designH * fit));
+            if (top != nullptr && top != this && top->isOnDesktop())
+                top->setTopLeftPosition (area.getX() + (area.getWidth() - top->getWidth()) / 2, area.getY());
+        }
+        full = true;
+    }
+    else
+    {
+        if (standalone && juce::Desktop::getInstance().getKioskModeComponent() != nullptr)
+            juce::Desktop::getInstance().setKioskModeComponent (nullptr);
+        else if (! normalBounds.isEmpty())
+            setSize (normalBounds.getWidth(), normalBounds.getHeight());
+        full = false;
+    }
+    view.setFullScreenLabel (full);
+}
+
+bool DriftwerkEditor::keyPressed (const juce::KeyPress& k)
+{
+    if (k == juce::KeyPress::F11Key || (full && k == juce::KeyPress::escapeKey)) { toggleFullScreen(); return true; }
+    return false;
 }
 
 void DriftwerkEditor::resized()
