@@ -98,6 +98,20 @@ public:
         return image;
     }
 
+    // How much slime is around a point (nx, ny in 0..1), averaged over a small square.
+    float density (float nx, float ny, int radius) const
+    {
+        const int cx = juce::jlimit (radius, W - 1 - radius, (int) (nx * (float) (W - 1)));
+        const int cy = juce::jlimit (radius, H - 1 - radius, (int) (ny * (float) (H - 1)));
+        float sum = 0.0f;
+        for (int y = cy - radius; y <= cy + radius; ++y)
+            for (int x = cx - radius; x <= cx + radius; ++x)
+                sum += trail[(size_t) (y * W + x)] + vein[(size_t) (y * W + x)] * 0.5f;
+        return sum / (float) ((2 * radius + 1) * (2 * radius + 1));
+    }
+    int width() const { return W; }
+    int height() const { return H; }
+
     float coreX = 0, coreY = 0;
     int tick = 0;
 

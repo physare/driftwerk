@@ -9,6 +9,8 @@
 #include "CameraTracker.h"
 #include "Sounds.h"
 #include "Harmony.h"
+#include "Weird.h"
+#include "Organism.h"
 
 class DriftwerkProcessor : public juce::AudioProcessor,
                            private juce::AudioProcessorValueTreeState::Listener,
@@ -139,6 +141,41 @@ public:
     void setMyChord (int slot, int degree, int type, int length);   // -1 leaves that part alone
     void setParam (const juce::String& id, float realValue);
 
+    // LOOPS layer (for the editor): where each loop is, how loud its note is, and which note.
+    std::array<std::atomic<float>, dw::TapeLoops::V> loopPhase, loopEnv;
+    std::array<std::atomic<int>, dw::TapeLoops::V> loopNote;
+    std::array<std::atomic<float>, dw::TapeLoops::V> loopRatio;
+    std::atomic<int> loopShuffleReq { 0 };                 // bump to give the loops new lengths and notes
+
+    // The organism (the slime): it lives on its own thread; its ears play SLIME notes and,
+    // in PULSE style ORGANISM, the drums. The editor shows this same slime.
+    Organism organism;
+    std::array<std::atomic<int>, Organism::maxEars> slimeEarNote;   // the last note each ear played
+    std::atomic<int> slimeNotes { 0 };
+
+    // PULSE: soft generative percussion. Each lane/step has a weight; DENSITY lights the steps
+    // whose weight is high enough. A click forces a step on (1) or off (-1). NEW reshuffles.
+    static constexpr int pulseLanes = dw::Pulse::Lanes, pulseSteps = dw::Pulse::Steps;
+    std::array<std::atomic<float>, pulseLanes * pulseSteps> pulseW;
+    std::array<std::atomic<int>, pulseLanes * pulseSteps> pulseF;
+    std::array<std::atomic<int>, pulseLanes> pulseLaneHits;
+    std::atomic<int> pulseStepNow { -1 }, pulseNewReq { 0 }, pulseStyleKnown { -1 };
+    bool pulseOn (int lane, int step, float density) const;
+    bool pulseOnNow (int lane, int step) const;
+    void setPulse (int lane, int step, bool on);
+    juce::String getPulseString() const;
+    void setPulseString (const juce::String&);
+
+    // TEXTURE: how busy each texture slot is (for the editor).
+    std::array<std::atomic<float>, 2> texEnergy;
+    std::atomic<int> texEvents { 0 };
+
+    // MEMORY: what it remembers (peaks, newest at memPeakHead - 1) and where its two heads are.
+    std::array<std::atomic<float>, dw::Memory::NumPeaks> memPeaks;
+    std::atomic<int> memPeakHead { 0 }, memForgetReq { 0 };
+    std::atomic<float> memSeconds { 0.0f };
+    std::array<std::atomic<float>, 2> memHeadAgo, memHeadWin, memHeadSpeed;
+
     // CHORDS layer: the notes it is playing now (for the editor).
     std::array<std::atomic<int>, dw::ChordLayer::V> chordNotes;
     std::atomic<int> chordNoteCount { 0 };
@@ -183,6 +220,31 @@ private:
     double curBeat = 0.0;
     dw::Random hitRng { 0x417517u };
     void updateChordLayer();
+
+    // LOOPS layer
+    dw::TapeLoops tapeLoops;
+    float loopPitches[12] {};
+    int loopPitchCount = 0, loopShuffleSeen = 0;
+    long long loopPitchKey = -1;
+    void updateLoopPitches();
+
+    // SLIME, PULSE, TEXTURE, MEMORY
+    dw::SlimeVoices slimeVoices;
+    dw::Pulse pulseDrums;
+    dw::Texture texture;
+    dw::Memory memory;
+    dw::Random weirdRng { (uint32_t) juce::Random::getSystemRandom().nextInt() | 1u };
+    int chordPcs[12] {}, chordPcCount = 0, scalePcs[12] {}, scalePcCount = 0;
+    long long weirdPitchKey = -1;
+    void updateWeirdPitches();
+    void playSlime (const Organism::Event& e);
+    void slimeDrum (const Organism::Event& e);
+    long long pulseLastK = -1;
+    bool pulseFlip[dw::Pulse::Lanes * dw::Pulse::Steps] {};
+    void pulseStep (int step, double stepSamples);
+    void generatePulse (int style);
+    float pulseFreq (int lane, int variant);
+    int pulseNewSeen = 0, memForgetSeen = 0, memPeakSeen = 0;
 
     // Harmony: the chord playing now, rebuilt only when it changes.
     harm::Harm curHarm;
@@ -324,6 +386,18 @@ private:
         int progColour = 0, progLen = 4, progRhythm = 0, droneChordUser = 1, dreamChordUser = 1;
         int slotDeg[harm::maxSlots] {}, slotType[harm::maxSlots] {}, slotLen[harm::maxSlots] {};
         int chdSteps = 8, chdRate = 1; float chdDensity = 0.5f, chdGate = 0.7f, chdVary = 0.0f;
+        bool loopOn = false; int loopNotes = 0, loopVoices = 5, loopOct = 0;
+        float loopLevel = 0.5f, loopLength = 14.0f, loopColour = 0.3f, loopTone = 0.55f, loopSwell = 0.4f, loopDecay = 6.0f,
+              loopDrift = 0.3f, loopWeird = 0.25f;
+        bool slimePlay = false; int slimeVoice = 3, slimeRange = 2, slimeOct = 1;
+        float slimeLevel = 0.5f, slimeTone = 0.6f, slimeWeird = 0.3f;
+        bool pulseOn = false; int pulseStyle = 0, pulseSpeed = 1;
+        float pulseLevel = 0.5f, pulseDensity = 0.5f, pulseSwing = 0.2f, pulseHuman = 0.3f, pulseTone = 0.45f, pulseSpace = 0.55f,
+              pulseVary = 0.2f, pulseWeird = 0.15f;
+        bool texOn = false; int texA = 0, texB = 0;
+        float texLevel = 0.4f, texBlend = 0.4f, texDensity = 0.5f, texTone = 0.5f, texMotion = 0.5f, texKey = 0.5f, texSpace = 0.4f;
+        bool memOn = false; int memSpeed = 1;
+        float memLevel = 0.5f, memAgo = 30.0f, memLength = 5.0f, memBlur = 0.35f, memScatter = 0.4f, memDissolve = 0.35f;
         int vco1Oct = 0, vco2Oct = 0; float vco1Fine = 0, vco2Fine = 0, vco1Pw = 0.5f, vco2Pw = 0.5f;
         float vco1Pwm = 0.5f, vco2Pwm = 0.5f, vco1Fm = 0.0f, vco2Fm = 0.0f;
         int droneChord = 1, droneOct = 0; float droneDetune = 0.4f, droneDriftAmt = 0.4f, droneLevel = 0.6f;

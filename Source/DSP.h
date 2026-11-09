@@ -846,4 +846,137 @@ struct ChordLayer
     }
 };
 
+//==============================================================================
+// Tape loops: up to 8 soft notes, each on a loop of its own length. The lengths don't divide
+// into each other, so the notes drift in and out of phase and never line up the same way twice.
+// WEIRD adds reversed swells, notes that bend like stretched tape, ghost notes and loops that
+// stretch a little each time round.
+struct TapeLoops
+{
+    static constexpr int V = 8;
+    struct Voice
+    {
+        double phase = 0.0;         // 0..1 through the loop; the note starts when it wraps
+        float ratio = 1.0f;         // loop length relative to LENGTH
+        int slot = 0, octave = 0;   // which note of the set it plays
+        float pan = 0.0f, wowRate = 0.5f, wowPh = 0.0f;
+        // the note sounding now
+        double ph = 0.0, mph = 0.0, gph = 0.0;
+        float note = 60.0f, env = 0.0f, t = 0.0f, age = 0.0f, bend = 0.0f, ghost = 0.0f, ghostIv = 12.0f, riseLen = 1.0f;
+        int stage = 0;              // 0 idle, 1 swell in, 2 fade, 3 reversed rise, 4 quick release
+    };
+    Voice v[V];
+    Random rng { 0x7A9E100Bu };
+    float sr = 44100.0f;
+    Svf fl, fr;
+    int coefCounter = 0;
+    int onsets = 0;                 // notes started so far (the editor flashes them)
+
+    float u() { return std::min (0.9999f, rng.next() * 0.5f + 0.5f); }
+
+    void prepare (float sampleRate)
+    {
+        sr = sampleRate;
+        shuffle (true);
+    }
+
+    // New loop lengths, start points and notes.
+    void shuffle (bool first = false)
+    {
+        static const float base[V] { 1.0f, 1.237f, 1.459f, 1.618f, 1.873f, 2.111f, 2.389f, 2.713f };
+        for (int i = 0; i < V; ++i)
+        {
+            auto& vo = v[i];
+            vo.ratio = base[i] * (0.93f + 0.14f * u());
+            vo.phase = first ? (i == 0 ? 0.985 : (double) u()) : vo.phase;
+            vo.slot = (int) (u() * 6.0f);
+            const float o = u();
+            vo.octave = o < 0.25f ? 1 : (o < 0.37f ? -1 : 0);
+            vo.pan = ((float) (i % 2 == 0 ? -1 : 1)) * (0.15f + 0.75f * u());
+            vo.wowRate = 0.25f + 0.6f * u();
+        }
+    }
+
+    bool anySounding() const { for (auto& vo : v) if (vo.stage != 0) return true; return false; }
+
+    void start (Voice& vo, const float* pitches, int n, float weird)
+    {
+        if (n <= 0) return;
+        if (u() < weird * 0.15f) return;                                   // WEIRD: now and then a loop stays silent
+        const int k = vo.slot;
+        vo.note = pitches[k % n] + 12.0f * (float) (k / n) + 12.0f * (float) vo.octave;
+        const float was = vo.stage != 0 ? vo.env : 0.0f;                  // still ringing: carry on from its level, no click
+        vo.age = 0.0f;
+        vo.stage = u() < weird * 0.45f ? 3 : 1;                            // WEIRD: reversed swells
+        vo.t = vo.stage == 1 ? was : std::cbrt (was);
+        vo.bend = (u() - 0.5f) * 2.0f * weird * 70.0f;                     // WEIRD: tape stretch, in cents
+        static const float ghosts[] { 12.0f, 19.0f, 24.0f, -12.0f };
+        vo.ghost = u() < weird * 0.6f ? 0.18f + 0.2f * u() : 0.0f;         // WEIRD: a quiet ghost note
+        vo.ghostIv = ghosts[(int) (u() * 4.0f)];
+        vo.ratio = clampf (vo.ratio * (1.0f + (u() - 0.5f) * 0.08f * weird), 0.6f, 3.6f);   // WEIRD: loops stretch
+        ++onsets;
+    }
+
+    // pitches: the notes the loops may play (MIDI, low to high). voices: how many loops run.
+    void process (const float* pitches, int n, int voices, float lengthSec, float colour, float tone, float swell,
+                  float decay, float drift, float weird, float& l, float& r)
+    {
+        if (coefCounter-- <= 0)
+        {
+            coefCounter = 32;
+            const float cut = 180.0f * std::exp2 (tone * 6.6f);
+            fl.set (cut, 0.6f, sr); fr.set (cut * 1.03f, 0.6f, sr);
+        }
+        const float atkTime = 0.02f + swell * swell * 5.0f;
+        const float decCoef = std::exp (-6.9f / (std::max (0.3f, decay) * sr));
+        const float relCoef = std::exp (-6.9f / (0.12f * sr));
+        const float modRatio = colour < 0.5f ? 2.0f : 2.0f + (colour - 0.5f) * 3.0f;   // bell > glass (inharmonic)
+        const float modIndex = colour < 0.5f ? colour * 2.4f : 1.2f + (colour - 0.5f) * 1.6f;
+        const float dt = 1.0f / sr;
+        float ol = 0.0f, orr = 0.0f;
+        for (int i = 0; i < V; ++i)
+        {
+            auto& vo = v[i];
+            if (i < voices)
+            {
+                vo.phase += 1.0 / ((double) vo.ratio * (double) std::max (1.0f, lengthSec) * (double) sr);
+                if (vo.phase >= 1.0) { vo.phase -= 1.0; start (vo, pitches, n, weird); }
+            }
+            if (vo.stage == 0) continue;
+
+            // Envelope
+            vo.age += dt;
+            switch (vo.stage)
+            {
+                case 1: vo.t += dt / atkTime; vo.env = vo.t >= 1.0f ? 1.0f : vo.t * vo.t * (3.0f - 2.0f * vo.t); if (vo.t >= 1.0f) vo.stage = 2; break;
+                case 2: vo.env *= decCoef; if (vo.env < 1.0e-4f) { vo.env = 0.0f; vo.stage = 0; } break;
+                case 3: vo.riseLen = atkTime + decay * 0.5f; vo.t += dt / vo.riseLen; vo.env = vo.t * vo.t * vo.t;
+                        if (vo.t >= 1.0f) { vo.env = 1.0f; vo.stage = 4; } break;
+                default: vo.env *= relCoef; if (vo.env < 1.0e-4f) { vo.env = 0.0f; vo.stage = 0; } break;
+            }
+            if (vo.stage == 0) continue;
+
+            // Pitch: the tape wobbles, and with WEIRD the note slowly bends as if the tape stretched.
+            vo.wowPh += vo.wowRate * dt; if (vo.wowPh >= 1.0f) vo.wowPh -= 1.0f;
+            const float cents = drift * 14.0f * std::sin (kTwoPi * vo.wowPh) + vo.bend * std::min (1.0f, vo.age / std::max (0.5f, decay));
+            const float f = midiToHz (vo.note + cents * 0.01f);
+            vo.ph += f / sr; if (vo.ph >= 1.0) vo.ph -= 1.0;
+            vo.mph += f * modRatio / sr; if (vo.mph >= 1.0) vo.mph -= 1.0;
+            const float bright = 0.3f + 0.7f * vo.env * vo.env;
+            float y = std::sin (kTwoPi * (float) vo.ph + modIndex * bright * std::sin (kTwoPi * (float) vo.mph));
+            if (vo.ghost > 0.0f)
+            {
+                vo.gph += midiToHz (vo.note + vo.ghostIv + cents * 0.013f) / sr; if (vo.gph >= 1.0) vo.gph -= 1.0;
+                y += vo.ghost * std::sin (kTwoPi * (float) vo.gph);
+            }
+            const float out = y * vo.env;
+            ol += out * (1.0f - vo.pan);
+            orr += out * (1.0f + vo.pan);
+        }
+        const float g = 0.11f;
+        l += fl.lowpass (ol) * g;
+        r += fr.lowpass (orr) * g;
+    }
+};
+
 } // namespace dw

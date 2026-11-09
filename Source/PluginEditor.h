@@ -99,12 +99,13 @@ public:
 class SlimeView : public juce::Component
 {
 public:
-    explicit SlimeView (DriftwerkProcessor& p) : proc (p), sim (300, 128, 22000) {}
+    // The slime lives in the processor (it plays even with this window closed); this shows it.
+    explicit SlimeView (DriftwerkProcessor& p) : proc (p) { proc.organism.viewers.fetch_add (1); proc.organism.ensureRunning(); }
+    ~SlimeView() override { proc.organism.viewers.fetch_sub (1); }
     void paint (juce::Graphics&) override;
-    void advance();
+    const juce::Image& latest (float level);           // the slime now, as a small image
     DriftwerkProcessor& proc;
-    SlimeSim sim;
-    juce::Image frame;
+    juce::Image frame, simImage;
 };
 
 class GrainView : public juce::Component
@@ -161,13 +162,14 @@ public:
     // The attachments must go before the buttons they watch (some buttons are declared after them).
     ~PerformPanel() override { bAtt.clear(); cAtt.clear(); sAtt.clear(); }
     void paint (juce::Graphics&) override;
-    bool hitTest (int x, int y) override { return tab != Organism || y < 34; }
+    bool hitTest (int x, int y) override { return tab != Organism || y < 34 || x >= organismStripX; }
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
     void mouseUp (const juce::MouseEvent&) override;
     void refresh();                                    // called by the UI timer
 
-    enum Tab { Sequence, ArpSound, Drone, Chords, Harmony, Organism, NumTabs };
+    enum Tab { Sequence, ArpSound, Drone, Chords, Harmony, Loops, Pulse, Texture, Memory, Organism, NumTabs };
+    static constexpr int organismStripX = 404;
     void setTab (int t);
 
 private:
@@ -184,6 +186,9 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> bAtt;
     juce::TextButton tabButtons[NumTabs];
     juce::TextButton chordsOnButton { "CHORDS ON" }, hitsNewButton { "NEW" };
+    juce::TextButton loopsOnButton { "LOOPS ON" }, shuffleButton { "SHUFFLE" }, pulseOnButton { "PULSE ON" }, pulseNewButton { "NEW" },
+                     texOnButton { "TEXTURE ON" }, memOnButton { "MEMORY ON" }, forgetButton { "FORGET" }, slimeOnButton { "SLIME PLAYS" };
+    void onOff (juce::TextButton& b, const char* param, int tabId, juce::Rectangle<int> r);
     juce::TextButton editChordsButton { "EDIT THESE" }, newChordsButton { "NEW CHORDS" };
     juce::TextButton holdButton { "HOLD" }, recButton { "REC NOTES" }, newButton { "NEW" }, clearButton { "CLEAR" },
                      leftButton { "<" }, rightButton { ">" }, saveButton { "SAVE" };
@@ -213,6 +218,24 @@ private:
     Flash flashes[10];
     int flashPos = 0, lastArpCount = -1, lastChordSig = -1;
     float ripple = 1.0f;
+
+    // LOOPS, PULSE, TEXTURE, MEMORY, ORGANISM
+    void paintLoops (juce::Graphics&);
+    void paintPulse (juce::Graphics&);
+    void paintTexture (juce::Graphics&);
+    void paintMemory (juce::Graphics&);
+    void paintOrganism (juce::Graphics&);
+    juce::Rectangle<int> pulseGrid() const { return { 182, 44, 506, 110 }; }
+    juce::Rectangle<int> memStrip() const { return { 14, 44, 672, 86 }; }
+    int pulsePaintLane = -1, pulsePaintStep = -1; bool pulsePaintOn = true;
+    float laneFlash[dw::Pulse::Lanes] {}; int laneSeen[dw::Pulse::Lanes] {};
+    float earFlash[Organism::maxEars] {}; int earSeen[Organism::maxEars] {};
+    static constexpr int texHistory = 140;
+    float texHist[2][texHistory] {}; int texHead = 0;
+    struct Mote { float x = 0, y = 0, life = 0; int slot = 0; };
+    Mote motes[48]; int motePos = 0, texEventsSeen = 0;
+    juce::Random uiRng;
+    void animate();
 };
 
 //==============================================================================
@@ -246,7 +269,7 @@ public:
     void showPerformTab (int t);
     void setFullScreenLabel (bool isFull);
     std::function<void()> onFullScreen;                    // set by the editor
-    void advanceSlime (int steps) { for (int i = 0; i < steps; ++i) slime->advance(); }
+    void advanceSlime (int steps) { for (int i = 0; i < steps / 2; ++i) proc.organism.tick(); }   // offline renders
 
     DriftwerkProcessor& proc;
     int dragOut = -1, dragIn = -1;

@@ -168,7 +168,8 @@ void SlimeLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, b
     const bool lit = over || down || b.getToggleState();
     const bool accent = b.getProperties()["accent"];
     g.setColour (lit ? juce::Colours::black : accent ? acid : fg);
-    g.setFont (dwui::font (12.0f).withExtraKerningFactor (0.08f));
+    const bool smallText = b.getProperties()["small"];
+    g.setFont (smallText ? dwui::font (10.5f).withExtraKerningFactor (0.03f) : dwui::font (12.0f).withExtraKerningFactor (0.08f));
     g.drawText (b.getButtonText(), b.getLocalBounds(), juce::Justification::centred);
 }
 
@@ -366,11 +367,15 @@ void CameraView::paint (juce::Graphics& g)
 }
 
 //==============================================================================
-void SlimeView::advance()
+const juce::Image& SlimeView::latest (float level)
 {
-    const bool active = proc.camera.isOpen();
-    sim.step (proc.monitor[O_CAM_X].load(), proc.monitor[O_CAM_Y].load(), proc.monitor[O_CAM_MOTION].load(),
-              active, juce::jlimit (0.0f, 1.0f, proc.outputLevel.load() * 1.6f));
+    if (! simImage.isValid()) simImage = juce::Image (juce::Image::RGB, Organism::W, Organism::H, true, juce::SoftwareImageType());
+    proc.organism.withSim ([&] (SlimeSim& s)
+    {
+        juce::Graphics g (simImage);
+        g.drawImageAt (s.render (level), 0, 0);
+    });
+    return simImage;
 }
 
 void SlimeView::paint (juce::Graphics& g)
@@ -378,7 +383,7 @@ void SlimeView::paint (juce::Graphics& g)
     const auto r = getLocalBounds().toFloat();
     g.fillAll (juce::Colours::black);
     const float level = juce::jlimit (0.0f, 1.0f, proc.outputLevel.load() * 1.6f);
-    const auto& img = sim.render (level);
+    const auto& img = latest (level);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImage (img, r);
     // Soft bloom: the same frame, blurred by scaling, drawn faintly on top.
@@ -396,9 +401,6 @@ void SlimeView::paint (juce::Graphics& g)
     g.setColour (fg2);
     g.setFont (dwui::font (12.0f));
     const bool cam = proc.camera.isOpen();
-    g.drawText ("Organism 01", 14, 10, 200, 16, juce::Justification::left);
-    g.setColour (acid);
-    g.drawText (cam ? "Following your hand" : "Exploring", 14, 26, 240, 16, juce::Justification::left);
     g.setColour (fg3);
     g.setFont (dwui::mono (10.5f));
     const juce::String readout = juce::String::formatted ("hand x %+.2f   y %+.2f   motion %.2f   level %.2f",
@@ -591,7 +593,7 @@ void FullCameraView::paint (juce::Graphics& g)
     // Slime mold grows over the picture.
     g.setOpacity (frame.isValid() ? 0.55f : 0.9f);
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
-    g.drawImage (slime.sim.render (level), pic);
+    g.drawImage (slime.latest (level), pic);
     g.setOpacity (1.0f);
     g.setColour (rule);
     g.drawRect (pic, 1.0f);
@@ -1238,8 +1240,6 @@ void MainView::timerCallback()
         if (std::abs (led - j->led) > 0.04f) { j->led = led; j->repaint(); }
     }
 
-    slime->advance();
-    slime->advance();
     if (fullCam->isVisible())
     {
         fullCam->pushTrail();
@@ -1258,11 +1258,13 @@ void MainView::timerCallback()
 //==============================================================================
 PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view (v)
 {
-    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "CHORDS", "HARMONY", "ORGANISM" };
+    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "CHORDS", "HARMONY", "LOOPS", "PULSE", "TEXTURE", "MEMORY", "ORGANISM" };
+    static_assert (sizeof (tabNames) / sizeof (tabNames[0]) == NumTabs);
     for (int t = 0; t < NumTabs; ++t)
     {
         tabButtons[t].setButtonText (tabNames[t]);
-        tabButtons[t].setBounds (700 - NumTabs * 84 + t * 84 - 8, 6, 80, 22);
+        tabButtons[t].getProperties().set ("small", true);
+        tabButtons[t].setBounds (10 + t * 68, 6, 64, 22);
         tabButtons[t].onClick = [this, t] { setTab (t); };
         addAndMakeVisible (tabButtons[t]);
     }
@@ -1367,7 +1369,73 @@ PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view
     combo ("prog.len", "LENGTH", Harmony, 498, 210, 88);
     combo ("prog.rhythm", "RHYTHM", Harmony, 600, 210, 88);
 
+    // ---- LOOPS tab: the orbits on the left, the loop settings on the right
+    onOff (loopsOnButton, "loop.on", Loops, { 262, 44, 96, 24 });
+    combo ("loop.notes", "NOTES", Loops, 366, 44, 90);
+    shuffleButton.setBounds (464, 44, 90, 24);
+    shuffleButton.onClick = [this] { proc.loopShuffleReq.fetch_add (1); proc.setParam ("loop.on", 1.0f); };
+    addAndMakeVisible (shuffleButton);
+    tabbed.push_back ({ &shuffleButton, Loops });
+    {
+        const std::pair<const char*, const char*> k[] { { "loop.level", "LEVEL" }, { "loop.length", "LENGTH" }, { "loop.voices", "LOOPS" },
+            { "loop.oct", "OCTAVE" }, { "loop.swell", "SWELL" }, { "loop.decay", "DECAY" }, { "loop.colour", "COLOUR" },
+            { "loop.tone", "TONE" }, { "loop.drift", "WOBBLE" }, { "loop.weird", "WEIRD" } };
+        for (int i = 0; i < 10; ++i) knob (k[i].first, k[i].second, Loops, 256 + (i % 5) * 86, 96 + (i / 5) * 82);
+    }
+    // ---- PULSE tab: settings on the left, the pattern (five lanes) on the right, knobs below
+    onOff (pulseOnButton, "pulse.on", Pulse, { 16, 46, 100, 24 });
+    combo ("pulse.style", "STYLE", Pulse, 16, 92, 100);
+    combo ("pulse.speed", "STEP", Pulse, 16, 142, 100);
+    pulseNewButton.setBounds (16, 198, 100, 24);
+    pulseNewButton.onClick = [this] { proc.pulseNewReq.fetch_add (1); proc.setParam ("pulse.on", 1.0f); };
+    addAndMakeVisible (pulseNewButton);
+    tabbed.push_back ({ &pulseNewButton, Pulse });
+    {
+        const std::pair<const char*, const char*> k[] { { "pulse.level", "LEVEL" }, { "pulse.density", "DENSITY" }, { "pulse.swing", "SWING" },
+            { "pulse.human", "HUMAN" }, { "pulse.tone", "TONE" }, { "pulse.space", "SPACE" }, { "pulse.vary", "VARY" }, { "pulse.weird", "WEIRD" } };
+        for (int i = 0; i < 8; ++i) knob (k[i].first, k[i].second, Pulse, 124 + i * 70, 172);
+    }
+    // ---- TEXTURE tab
+    onOff (texOnButton, "tex.on", Texture, { 16, 46, 100, 24 });
+    combo ("tex.a", "TEXTURE A", Texture, 16, 92, 100);
+    combo ("tex.b", "TEXTURE B", Texture, 16, 142, 100);
+    {
+        const std::pair<const char*, const char*> k[] { { "tex.level", "LEVEL" }, { "tex.blend", "A / B" }, { "tex.density", "DENSITY" },
+            { "tex.tone", "TONE" }, { "tex.motion", "MOTION" }, { "tex.key", "IN KEY" }, { "tex.space", "SPACE" } };
+        for (int i = 0; i < 7; ++i) knob (k[i].first, k[i].second, Texture, 130 + i * 78, 176);
+    }
+    // ---- MEMORY tab: the last three minutes along the top, settings below
+    onOff (memOnButton, "mem.on", Memory, { 16, 150, 100, 24 });
+    combo ("mem.speed", "SPEED", Memory, 16, 196, 100);
+    forgetButton.setBounds (16, 246, 100, 22);
+    forgetButton.onClick = [this] { proc.memForgetReq.fetch_add (1); };
+    addAndMakeVisible (forgetButton);
+    tabbed.push_back ({ &forgetButton, Memory });
+    {
+        const std::pair<const char*, const char*> k[] { { "mem.level", "LEVEL" }, { "mem.ago", "HOW LONG AGO" }, { "mem.length", "FRAGMENT" },
+            { "mem.scatter", "SCATTER" }, { "mem.blur", "BLUR" }, { "mem.dissolve", "DISSOLVE" } };
+        for (int i = 0; i < 6; ++i) knob (k[i].first, k[i].second, Memory, 140 + i * 90, 150);
+    }
+    // ---- ORGANISM tab: the slime shows through; its ears and their settings on the right
+    onOff (slimeOnButton, "slime.play", Organism, { 414, 44, 112, 24 });
+    combo ("slime.voice", "VOICE", Organism, 536, 44, 150);
+    {
+        const std::pair<const char*, const char*> k[] { { "slime.level", "LEVEL" }, { "slime.activity", "ACTIVITY" }, { "slime.weird", "WEIRD" },
+            { "slime.ears", "EARS" }, { "slime.growth", "GROWTH" }, { "slime.range", "RANGE" }, { "slime.oct", "OCTAVE" }, { "slime.tone", "TONE" } };
+        for (int i = 0; i < 8; ++i) knob (k[i].first, k[i].second, Organism, 408 + (i % 4) * 70, 94 + (i / 4) * 76);
+    }
+
     setTab (Sequence);
+}
+
+void PerformPanel::onOff (juce::TextButton& b, const char* param, int tabId, juce::Rectangle<int> r)
+{
+    b.setBounds (r);
+    b.setClickingTogglesState (true);
+    b.getProperties().set ("accent", true);
+    addAndMakeVisible (b);
+    bAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, param, b));
+    tabbed.push_back ({ &b, tabId });
 }
 
 void PerformPanel::knob (const char* param, const char* label, int tabId, int x, int y)
@@ -1417,7 +1485,8 @@ void PerformPanel::refresh()
         slotButtons[i].setToggleState (i == lastSlot, juce::dontSendNotification);
     }
     if (tab == Harmony) animateWheel();
-    if (tab == Sequence || tab == Harmony || tab == Chords) repaint();
+    animate();
+    if (tab != ArpSound && tab != Drone) repaint();
 }
 
 int PerformPanel::colAt (int x) const
@@ -1443,6 +1512,20 @@ void PerformPanel::mouseDown (const juce::MouseEvent& e)
 {
     dragCol = -1;
     hitPaintCol = -1;
+    pulsePaintLane = -1;
+    if (tab == Pulse && pulseGrid().contains (e.getPosition()))
+    {
+        // Click a step to force it on or off; drag along the lane to paint more.
+        const auto gr = pulseGrid();
+        const int lane = juce::jlimit (0, dw::Pulse::Lanes - 1, (e.y - gr.getY()) * dw::Pulse::Lanes / gr.getHeight());
+        const int step = juce::jlimit (0, dw::Pulse::Steps - 1, (e.x - gr.getX()) * dw::Pulse::Steps / gr.getWidth());
+        pulsePaintOn = ! proc.pulseOnNow (lane, step);
+        pulsePaintLane = lane; pulsePaintStep = step;
+        proc.setPulse (lane, step, pulsePaintOn);
+        proc.setParam ("pulse.on", 1.0f);
+        repaint();
+        return;
+    }
     if (tab == Chords && hitGrid().contains (e.getPosition()))
     {
         // Click a step to force it on or off; drag to paint more. This plays the pattern (STEPS).
@@ -1475,6 +1558,13 @@ void PerformPanel::mouseDown (const juce::MouseEvent& e)
 
 void PerformPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (pulsePaintLane >= 0)
+    {
+        const auto gr = pulseGrid();
+        const int step = juce::jlimit (0, dw::Pulse::Steps - 1, (e.x - gr.getX()) * dw::Pulse::Steps / gr.getWidth());
+        if (step != pulsePaintStep) { pulsePaintStep = step; proc.setPulse (pulsePaintLane, step, pulsePaintOn); repaint(); }
+        return;
+    }
     if (hitPaintCol >= 0)
     {
         const int i = hitAt (e.x);
@@ -1505,7 +1595,7 @@ void PerformPanel::mouseUp (const juce::MouseEvent& e)
 void PerformPanel::paint (juce::Graphics& g)
 {
     using namespace dwui;
-    if (tab == Organism) return;      // the slime shows through untouched
+    if (tab == Organism) { paintOrganism (g); return; }      // the slime shows through
     g.setColour (juce::Colours::black.withAlpha (0.74f));
     g.fillRect (getLocalBounds());
     g.setColour (juce::Colours::black.withAlpha (0.9f));           // keep the slime's own captions out of the way
@@ -1514,18 +1604,18 @@ void PerformPanel::paint (juce::Graphics& g)
     g.setColour (rule);
     g.drawRect (getLocalBounds(), 1);
 
-    const char* titles[] { "Sequence", "Arp sound", "Drone", "Chords", "Harmony" };
     const char* subs[] { "HOLD keeps the pattern. Click a step on/off, drag to set its note, REC NOTES to play it in.",
                          "shapes the arp voice: VCO > VCF 1 > VCA 1 (in most presets)",
                          "TYPE: saws, organ, strings, glass or choir. COLOUR shapes each type (brightness, drawbars, width, shimmer, vowel).",
                          "plays the HARMONY chord, in tune with everything. STEPS plays the HITS pattern: DENSITY fills it, NEW reshuffles, VARY changes it each loop.",
-                         "circle of fifths in your key: lit notes are the chord now, the arrow points to the next one. Click a chord on the right to change it." };
-    g.setColour (fg);
-    g.setFont (dwui::font (15.0f));
-    g.drawText (titles[tab], 14, 8, 200, 20, juce::Justification::left);
+                         "circle of fifths in your key: lit notes are the chord now, the arrow points to the next one. Click a chord on the right to change it.",
+                         "loops of different lengths drift in and out of phase, each ringing a note of the chord. WEIRD reverses, bends and ghosts them.",
+                         "soft drums. DENSITY fills the pattern, NEW reshuffles it, click steps to force them. Style ORGANISM lets the slime drum.",
+                         "weather and creatures, made from nothing. IN KEY tunes drops, bubbles, whistles and birds to the chord.",
+                         "Timewind drifts back into what it played: slower, reversed, blurred. DISSOLVE lets memories fade into memories." };
     g.setColour (fg3);
     g.setFont (dwui::font (10.5f));
-    g.drawText (subs[tab], 14, getHeight() - 22, getWidth() - 28, 14, juce::Justification::left);
+    g.drawFittedText (subs[tab], 14, getHeight() - 22, getWidth() - 28, 14, juce::Justification::left, 1, 0.8f);
 
     g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
     for (auto& l : labs)
@@ -1575,6 +1665,315 @@ void PerformPanel::paint (juce::Graphics& g)
         paintChords (g);
     else if (tab == Harmony)
         paintHarmony (g);
+    else if (tab == Loops)
+        paintLoops (g);
+    else if (tab == Pulse)
+        paintPulse (g);
+    else if (tab == Texture)
+        paintTexture (g);
+    else if (tab == Memory)
+        paintMemory (g);
+}
+
+
+//==============================================================================
+// LOOPS, PULSE, TEXTURE, MEMORY and the ORGANISM's ears
+void PerformPanel::animate()
+{
+    for (int l = 0; l < dw::Pulse::Lanes; ++l)
+    {
+        const int h = proc.pulseLaneHits[(size_t) l].load();
+        if (h != laneSeen[l]) { laneSeen[l] = h; laneFlash[l] = 1.0f; }
+        else laneFlash[l] *= 0.82f;
+    }
+    for (int k = 0; k < Organism::maxEars; ++k)
+    {
+        const int h = proc.organism.earHits[(size_t) k].load();
+        if (h != earSeen[k]) { earSeen[k] = h; earFlash[k] = 1.0f; }
+        else earFlash[k] *= 0.93f;
+    }
+    // TEXTURE: a short history of how busy each slot is, and a mote for each new sound
+    texHead = (texHead + 1) % texHistory;
+    for (int i = 0; i < 2; ++i) texHist[i][texHead] = proc.texEnergy[(size_t) i].load();
+    const int ev = proc.texEvents.load();
+    int fresh = juce::jlimit (0, 6, ev - texEventsSeen);
+    texEventsSeen = ev;
+    while (fresh-- > 0)
+    {
+        auto& m = motes[motePos];
+        motePos = (motePos + 1) % 48;
+        m.x = uiRng.nextFloat(); m.y = uiRng.nextFloat(); m.life = 1.0f; m.slot = uiRng.nextInt (2);
+    }
+    for (auto& m : motes) m.life *= 0.9f;
+}
+
+void PerformPanel::paintLoops (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const bool on = pv ("loop.on") > 0.5f;
+    const int voices = juce::jlimit (1, 8, (int) std::lround (pv ("loop.voices")));
+    const juce::Point<float> c (128.0f, 158.0f);
+    const harm::Spelling sp (proc.keyPcNow.load(), (int) std::lround (pv ("arp.scale")));
+    g.setColour (acid.withAlpha (0.25f));
+    g.fillEllipse (c.x - 3.0f, c.y - 3.0f, 6.0f, 6.0f);
+    for (int i = 0; i < dw::TapeLoops::V; ++i)
+    {
+        const float rad = 26.0f + (float) i * 12.5f;
+        const bool live = on && i < voices;
+        g.setColour ((live ? fg2 : fg3).withAlpha (live ? 0.3f : 0.1f));
+        g.drawEllipse (c.x - rad, c.y - rad, rad * 2.0f, rad * 2.0f, 1.0f);
+        const float env = proc.loopEnv[(size_t) i].load();
+        const float ph = proc.loopPhase[(size_t) i].load();
+        const float a = ph * juce::MathConstants<float>::twoPi - juce::MathConstants<float>::halfPi;
+        const juce::Point<float> d (c.x + rad * std::cos (a), c.y + rad * std::sin (a));
+        // the tape: a short bright arc behind the dot, longer when the note rings
+        if (live || env > 0.01f)
+        {
+            juce::Path arc;
+            const float len = 0.25f + 1.4f * env;
+            arc.addCentredArc (c.x, c.y, rad, rad, 0.0f, a + juce::MathConstants<float>::halfPi - len, a + juce::MathConstants<float>::halfPi, true);
+            g.setColour (acid.withAlpha (0.12f + 0.5f * env));
+            g.strokePath (arc, juce::PathStrokeType (1.6f + 2.0f * env, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        }
+        drawGlowDot (g, d, live ? 0.25f + 0.75f * env : 0.08f, 2.4f + 3.0f * env);
+        if (env > 0.06f)
+        {
+            g.setColour (fg.withAlpha (juce::jmin (1.0f, env * 1.6f)));
+            g.setFont (dwui::mono (9.5f));
+            const float tx = d.x + (d.x >= c.x ? 7.0f : -37.0f);
+            g.drawText (harm::noteName (proc.loopNote[(size_t) i].load(), sp), juce::Rectangle<float> (tx, d.y - 6.0f, 30.0f, 12.0f),
+                        d.x >= c.x ? juce::Justification::left : juce::Justification::right);
+        }
+    }
+    g.setColour (on ? fg3 : fg3.withAlpha (0.6f));
+    g.setFont (dwui::font (10.0f));
+    g.drawText (on ? juce::String (voices) + " loops, " + juce::String (pv ("loop.length"), 1) + " s and longer" : "LOOPS is off",
+                256, 250, 430, 14, juce::Justification::left);
+}
+
+void PerformPanel::paintPulse (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const bool on = pv ("pulse.on") > 0.5f;
+    const int style = (int) std::lround (pv ("pulse.style"));
+    const auto gr = pulseGrid();
+    const int L = dw::Pulse::Lanes, N = dw::Pulse::Steps;
+    const float cw = (float) gr.getWidth() / (float) N, lh = (float) gr.getHeight() / (float) L;
+    const int cur = proc.pulseStepNow.load();
+    const char* laneNames[] { "THUMP", "SKIN", "WOOD", "BRUSH", "TICK" };
+    for (int l = 0; l < L; ++l)
+    {
+        const float y = (float) gr.getY() + lh * (float) l;
+        g.setColour ((on ? fg2 : fg3).interpolatedWith (acid, laneFlash[l] * (on ? 0.9f : 0.0f)));
+        g.setFont (dwui::font (9.5f).withExtraKerningFactor (0.06f));
+        g.drawText (laneNames[l], juce::Rectangle<float> (124.0f, y, 52.0f, lh), juce::Justification::centredRight);
+        for (int i = 0; i < N; ++i)
+        {
+            const auto cell = juce::Rectangle<float> ((float) gr.getX() + cw * (float) i, y, cw, lh).reduced (2.0f, 2.5f);
+            g.setColour (juce::Colours::white.withAlpha (i % 4 == 0 ? 0.07f : 0.04f));
+            g.fillRect (cell);
+            if (i == cur && on) { g.setColour (acid.withAlpha (0.14f)); g.fillRect (cell); }
+            const bool hit = proc.pulseOnNow (l, i);
+            const float w = proc.pulseW[(size_t) (l * N + i)].load();
+            const int force = proc.pulseF[(size_t) (l * N + i)].load();
+            if (hit)
+            {
+                const float vel = force > 0 ? 0.8f : 0.4f + 0.5f * juce::jmin (1.0f, w);
+                const float h = cell.getHeight() * (0.35f + 0.65f * vel);
+                g.setColour (acid.withAlpha (on ? (i == cur ? 1.0f : 0.75f) : 0.3f));
+                g.fillRect (cell.withSizeKeepingCentre (juce::jmin (10.0f, cell.getWidth() - 6.0f), h));
+            }
+            else if (w > 0.0f)
+            {
+                g.setColour (fg3.withAlpha (0.25f + 0.4f * w));   // could play: DENSITY up lights it
+                g.fillRect (cell.withSizeKeepingCentre (2.0f, 2.0f));
+            }
+            if (force != 0)
+            {
+                g.setColour (force > 0 ? acid : fg3);
+                g.fillEllipse (cell.getRight() - 4.0f, cell.getY() + 1.0f, 3.0f, 3.0f);
+            }
+        }
+    }
+    g.setColour (fg3);
+    g.setFont (dwui::font (10.0f));
+    const char* how[] { "a slow lub-dub", "loose and sparse", "a lazy broken beat", "no beat: things falling", "a soft steady pulse",
+                        "the slime's ears play the drums: high ears tick, low ears thump" };
+    g.drawText (on ? how[juce::jlimit (0, 5, style)] : "PULSE is off", gr.getX(), gr.getBottom() + 2, gr.getWidth(), 14, juce::Justification::right);
+}
+
+void PerformPanel::paintTexture (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const bool on = pv ("tex.on") > 0.5f;
+    const int a = (int) std::lround (pv ("tex.a")), b = (int) std::lround (pv ("tex.b")) - 1;
+    const char* names[] { "RAIN", "WIND", "STREAM", "CRACKLE", "CREATURES", "FIRE", "SHORE" };
+    const juce::Rectangle<float> area (130.0f, 44.0f, 558.0f, 116.0f);
+    for (int slot = 0; slot < 2; ++slot)
+    {
+        const auto lane = area.withHeight (area.getHeight() * 0.5f).translated (0.0f, area.getHeight() * 0.5f * (float) slot).reduced (0.0f, 3.0f);
+        g.setColour (juce::Colours::white.withAlpha (0.035f));
+        g.fillRect (lane);
+        const int kind = slot == 0 ? a : b;
+        const bool live = on && kind >= 0;
+        if (live)
+        {
+            // a soft terrain: how busy it has been, newest on the right
+            juce::Path p;
+            p.startNewSubPath (lane.getX(), lane.getBottom());
+            float peak = 1.0e-4f;
+            for (int i = 0; i < texHistory; ++i) peak = juce::jmax (peak, texHist[slot][i]);
+            for (int i = 0; i < texHistory; ++i)
+            {
+                const float v = texHist[slot][(texHead + 1 + i) % texHistory] / (peak * 1.15f);
+                p.lineTo (lane.getX() + lane.getWidth() * (float) i / (float) (texHistory - 1), lane.getBottom() - lane.getHeight() * 0.8f * v);
+            }
+            p.lineTo (lane.getRight(), lane.getBottom());
+            p.closeSubPath();
+            g.setColour (acid.withAlpha (0.13f));
+            g.fillPath (p);
+            g.setColour (acid.withAlpha (0.5f));
+            g.strokePath (p, juce::PathStrokeType (1.0f));
+            for (auto& m : motes)
+                if (m.slot == slot && m.life > 0.05f)
+                    drawGlowDot (g, { lane.getX() + 10.0f + m.x * (lane.getWidth() - 20.0f), lane.getY() + 6.0f + m.y * (lane.getHeight() - 12.0f) }, m.life, 1.6f + 1.5f * m.life);
+        }
+        g.setColour (live ? fg : fg3);
+        g.setFont (dwui::font (10.5f).withExtraKerningFactor (0.06f));
+        g.drawText (kind >= 0 ? juce::String (slot == 0 ? "A  " : "B  ") + names[juce::jlimit (0, 6, kind)] : juce::String ("B  off"),
+                    lane.reduced (6.0f, 3.0f).toNearestInt(), juce::Justification::topLeft);
+    }
+    if (! on)
+    {
+        g.setColour (fg3);
+        g.setFont (dwui::font (10.0f));
+        g.drawText ("TEXTURE is off", area.toNearestInt(), juce::Justification::centred);
+    }
+}
+
+void PerformPanel::paintMemory (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const bool on = pv ("mem.on") > 0.5f;
+    const auto st = memStrip().toFloat();
+    g.setColour (juce::Colours::white.withAlpha (0.03f));
+    g.fillRect (st);
+    const float maxAgo = (float) dw::Memory::Seconds;
+    auto xFor = [&] (float ago) { return st.getRight() - st.getWidth() * std::log1p (juce::jmax (0.0f, ago)) / std::log1p (maxAgo); };
+    const float have = juce::jmin (maxAgo, proc.memSeconds.load());
+    // not remembered yet
+    g.setColour (juce::Colours::black.withAlpha (0.35f));
+    g.fillRect (juce::Rectangle<float>::leftTopRightBottom (st.getX(), st.getY(), xFor (have), st.getBottom()));
+    // what it remembers: louder moments taller, newest on the right (time runs on a log scale)
+    const int head = proc.memPeakHead.load(), NP = dw::Memory::NumPeaks;
+    const float mid = st.getCentreY();
+    for (int x = (int) st.getX(); x < (int) st.getRight(); ++x)
+    {
+        // which seconds ago this pixel covers
+        auto agoAt = [&] (float px) { return std::expm1 ((st.getRight() - px) / st.getWidth() * std::log1p (maxAgo)); };
+        const float a0 = agoAt ((float) x + 1.0f), a1 = agoAt ((float) x);
+        if (a1 > have) continue;
+        float pk = 0.0f;
+        for (int j = (int) std::floor (a0 * dw::Memory::PeakRate); j <= (int) std::ceil (a1 * dw::Memory::PeakRate); ++j)
+            pk = juce::jmax (pk, proc.memPeaks[(size_t) (((head - 1 - j) % NP + NP) % NP)].load());
+        const float h = juce::jmin (1.0f, pk * 1.6f) * st.getHeight() * 0.45f;
+        g.setColour (fg.withAlpha (0.28f));
+        g.drawVerticalLine (x, mid - h, mid + h);
+    }
+    // the heads, wandering back into it
+    if (on)
+    {
+        const float ago = pv ("mem.ago");
+        g.setColour (acid.withAlpha (0.07f));
+        g.fillRect (juce::Rectangle<float>::leftTopRightBottom (xFor (ago * 1.6f), st.getY(), xFor (ago * 0.55f), st.getBottom()));
+        for (int k = 0; k < 2; ++k)
+        {
+            const float w = proc.memHeadWin[(size_t) k].load();
+            const float x = xFor (proc.memHeadAgo[(size_t) k].load());
+            const float speed = proc.memHeadSpeed[(size_t) k].load();
+            g.setColour (acid.withAlpha (0.2f + 0.8f * w));
+            g.drawLine (x, st.getY() + 2.0f, x, st.getBottom() - 2.0f, 1.0f + 1.5f * w);
+            drawGlowDot (g, { x, st.getY() + 6.0f }, 0.3f + 0.7f * w, 2.5f + 2.0f * w);
+            g.setFont (dwui::mono (9.0f));
+            juce::String sp = std::abs (std::abs (speed) - 1.0f) < 0.01f ? "1x" : (std::abs (std::abs (speed) - 0.5f) < 0.01f ? "1/2" : (std::abs (std::abs (speed) - 0.25f) < 0.01f ? "1/4" : juce::String (std::abs (speed), 2)));
+            if (speed < 0.0f) sp = "rev " + sp;
+            g.setColour (fg.withAlpha (0.4f + 0.6f * w));
+            g.drawText (sp, juce::Rectangle<float> (x - 30.0f, st.getBottom() - 15.0f - 12.0f * (float) k, 60.0f, 12.0f), juce::Justification::centred);
+        }
+    }
+    // time marks
+    g.setFont (dwui::mono (9.0f));
+    const std::pair<float, const char*> marks[] { { 0.0f, "now" }, { 5.0f, "5s" }, { 15.0f, "15s" }, { 30.0f, "30s" }, { 60.0f, "1m" }, { 120.0f, "2m" }, { 200.0f, "3m20" } };
+    for (auto& [s, t] : marks)
+    {
+        const float x = xFor (s);
+        g.setColour (rule);
+        g.drawVerticalLine ((int) x, st.getBottom(), st.getBottom() + 4.0f);
+        g.setColour (fg3);
+        g.drawText (t, juce::Rectangle<float> (x - 20.0f, st.getBottom() + 4.0f, 40.0f, 11.0f), juce::Justification::centred);
+    }
+    g.setColour (on ? fg2 : fg3);
+    g.setFont (dwui::font (10.0f));
+    const int secs = (int) have;
+    g.drawText ((on ? "remembering " : "MEMORY is off. Remembered so far: ") + juce::String (secs / 60) + ":" + juce::String (secs % 60).paddedLeft ('0', 2),
+                juce::Rectangle<float> (st.getX() + 6.0f, st.getY() + 3.0f, 300.0f, 12.0f), juce::Justification::left);
+}
+
+void PerformPanel::paintOrganism (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const bool plays = pv ("slime.play") > 0.5f;
+    const bool drums = pv ("pulse.on") > 0.5f && (int) std::lround (pv ("pulse.style")) == 5;
+    const bool listening = plays || drums;
+    const int ears = juce::jlimit (3, Organism::maxEars, (int) std::lround (pv ("slime.ears")));
+    const harm::Spelling sp (proc.keyPcNow.load(), (int) std::lround (pv ("arp.scale")));
+    const float W = (float) getWidth(), H = (float) getHeight();
+
+    g.setColour (fg2);
+    g.setFont (dwui::font (12.0f));
+    g.drawText ("Organism 01", 14, 38, 200, 16, juce::Justification::left);
+    g.setColour (acid);
+    g.drawText (proc.camera.isOpen() ? "Following your hand" : (listening ? "Listening" : "Exploring"), 14, 54, 240, 16, juce::Justification::left);
+
+    // the ears
+    for (int k = 0; k < ears; ++k)
+    {
+        const juce::Point<float> c (proc.organism.earX[(size_t) k].load() * W, proc.organism.earY[(size_t) k].load() * H);
+        const float lvl = proc.organism.earLevel[(size_t) k].load(), fl = earFlash[k];
+        const float r = 6.0f + 4.0f * lvl + 10.0f * fl;
+        g.setColour ((listening ? acid : fg3).withAlpha (listening ? 0.35f + 0.5f * fl : 0.25f));
+        g.drawEllipse (c.x - r, c.y - r, r * 2.0f, r * 2.0f, 1.0f + fl);
+        g.setColour ((listening ? fg : fg3).withAlpha (0.5f));
+        g.drawEllipse (c.x - 2.5f, c.y - 2.5f, 5.0f, 5.0f, 1.0f);
+        if (fl > 0.05f && listening) drawGlowDot (g, c, fl, 3.0f + 3.0f * fl);
+        const int note = proc.slimeEarNote[(size_t) k].load();
+        if (plays && note >= 0 && fl > 0.08f)
+        {
+            g.setColour (fg.withAlpha (juce::jmin (1.0f, fl * 1.5f)));
+            g.setFont (dwui::mono (10.0f));
+            g.drawText (harm::noteName (note, sp), juce::Rectangle<float> (c.x - 20.0f, c.y - r - 14.0f, 40.0f, 12.0f), juce::Justification::centred);
+        }
+    }
+
+    // the strip of settings
+    const auto strip = juce::Rectangle<int> (organismStripX, 34, getWidth() - organismStripX, getHeight() - 62);
+    g.setColour (juce::Colours::black.withAlpha (0.66f));
+    g.fillRect (strip);
+    g.setColour (rule);
+    g.drawVerticalLine (organismStripX, (float) strip.getY(), (float) strip.getBottom());
+    g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
+    for (auto& l : labs)
+        if (l.tab == tab) { g.setColour (fg2); g.drawText (l.t, l.r, juce::Justification::centred); }
+    g.setColour (listening ? acid.withAlpha (0.8f) : fg3);
+    g.setFont (dwui::font (10.0f));
+    g.drawFittedText (listening ? juce::String (ears) + " ears listening. When a vein reaches one, it plays" + (plays ? " its note." : " a drum.")
+                                : juce::String ("SLIME PLAYS: veins reaching an ear play its note"),
+                      strip.getX() + 10, strip.getBottom() - 30, strip.getWidth() - 20, 26, juce::Justification::centredLeft, 2);
 }
 
 void PerformPanel::paintChords (juce::Graphics& g)

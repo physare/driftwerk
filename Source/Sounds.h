@@ -8,9 +8,10 @@
 
 namespace dw
 {
-constexpr int numBuiltInSounds = 8;
+constexpr int numBuiltInSounds = 13;
 inline const char* const builtInSoundNames[numBuiltInSounds] {
-    "GLASS CHOIR", "BOWED METAL", "TAPE PIANO", "VOX PAD", "MUSIC BOX", "WIND ORGAN", "STRING DUST", "TUNED RAIN" };
+    "GLASS CHOIR", "BOWED METAL", "TAPE PIANO", "VOX PAD", "MUSIC BOX", "WIND ORGAN", "STRING DUST", "TUNED RAIN",
+    "KALIMBA", "SINGING BOWL", "WHALE GLASS", "BREATH FLUTE", "SLIME CHOIR" };
 constexpr float builtInRoot = 57.0f;   // A3: all built-in sounds are rooted here
 
 namespace sounds
@@ -347,6 +348,140 @@ inline std::unique_ptr<SampleData> tunedRain()
     return sd;
 }
 
+
+inline float u01 (Random& rng) { return rng.next() * 0.5f + 0.5f; }
+
+// 8: a kalimba: little metal tongues plucked in a slow, uneven pattern.
+inline std::unique_ptr<SampleData> kalimba()
+{
+    auto sd = blank (8.0);
+    Random rng (0x4A11u);
+    const float notes[] { 57.0f, 64.0f, 69.0f, 76.0f, 81.0f };
+    for (float t0 = 0.05f; t0 < 7.3f; t0 += 0.28f + 0.5f * u01 (rng))
+    {
+        const float note = notes[(int) (u01 (rng) * 4.999f)];
+        const float pan = rng.next() * 0.6f, vel = 0.55f + 0.45f * u01 (rng);
+        const int start = (int) (t0 * fs);
+        const float f = hz (note);
+        for (int i = start; i < sd->length(); ++i)
+        {
+            const float t = (float) (i - start) / (float) fs;
+            const float env = std::exp (-t * 1.7f) * std::min (1.0f, t * 1500.0f);
+            if (env < 1.0e-4f && t > 0.01f) break;
+            const float s = (std::sin (kTwoPi * f * t) + 0.22f * std::exp (-t * 14.0f) * std::sin (kTwoPi * 5.93f * f * t)
+                             + 0.07f * std::exp (-t * 30.0f) * std::sin (kTwoPi * 11.7f * f * t)) * 0.12f * vel * env;
+            sd->left[(size_t) i] += s * (1.0f - pan); sd->right[(size_t) i] += s * (1.0f + pan);
+        }
+    }
+    finish (*sd);
+    return sd;
+}
+
+// 9: a singing bowl: struck twice, ringing with slow beats between its paired partials.
+inline std::unique_ptr<SampleData> singingBowl()
+{
+    auto sd = blank (10.0);
+    const float base = hz (45.0f);
+    const float ratios[] { 1.0f, 1.0021f, 2.01f, 2.0142f, 2.98f, 2.9862f, 4.05f, 6.02f };
+    const float amps[] { 0.5f, 0.45f, 0.34f, 0.3f, 0.2f, 0.18f, 0.08f, 0.04f };
+    const float decay[] { 0.22f, 0.22f, 0.32f, 0.32f, 0.5f, 0.5f, 0.9f, 1.4f };
+    const float strikes[] { 0.05f, 5.1f };
+    for (int si = 0; si < 2; ++si)
+    {
+        const int start = (int) (strikes[si] * fs);
+        const float vel = si == 0 ? 1.0f : 0.7f;
+        for (int i = start; i < sd->length(); ++i)
+        {
+            const float t = (float) (i - start) / (float) fs;
+            const float atk = std::min (1.0f, t * 400.0f);
+            float l = 0.0f, r = 0.0f;
+            for (int k = 0; k < 8; ++k)
+            {
+                const float v = amps[k] * std::exp (-t * decay[k]) * std::sin (kTwoPi * base * ratios[k] * t + (float) k);
+                (k % 2 ? r : l) += v;
+            }
+            sd->left[(size_t) i] += (l + r * 0.35f) * 0.15f * vel * atk;
+            sd->right[(size_t) i] += (r + l * 0.35f) * 0.15f * vel * atk;
+        }
+    }
+    finish (*sd);
+    return sd;
+}
+
+// 10: whale glass: two slow voices sliding between A and E, octaves apart, glassy.
+inline std::unique_ptr<SampleData> whaleGlass()
+{
+    auto sd = blank (10.0);
+    const float pathA[] { 57.0f, 64.0f, 69.0f, 64.0f, 57.0f };
+    const float pathB[] { 69.0f, 76.0f, 64.0f, 81.0f, 69.0f };
+    double ph[2] {}, mph[2] {};
+    for (int i = 0; i < sd->length(); ++i)
+    {
+        const float t = (float) i / (float) fs;
+        const float seg = t / 2.5f;
+        const int k = std::min (3, (int) seg);
+        const float x = seg - (float) k;
+        const float glide = x < 0.6f ? 0.0f : (x - 0.6f) / 0.4f;
+        const float g = glide * glide * (3.0f - 2.0f * glide);
+        float out[2];
+        for (int v = 0; v < 2; ++v)
+        {
+            const float* path = v == 0 ? pathA : pathB;
+            const float note = path[k] + (path[k + 1] - path[k]) * g + 0.12f * std::sin (kTwoPi * (0.21f + 0.07f * (float) v) * t);
+            const float f = hz (note);
+            ph[v] += f / fs; if (ph[v] >= 1.0) ph[v] -= 1.0;
+            mph[v] += f * 2.0 / fs; if (mph[v] >= 1.0) mph[v] -= 1.0;
+            const float swell = 0.55f + 0.45f * std::sin (kTwoPi * (t / 5.0f + (float) v * 0.3f));
+            out[v] = std::sin (kTwoPi * (float) ph[v] + 0.7f * swell * std::sin (kTwoPi * (float) mph[v])) * swell * (v == 0 ? 0.2f : 0.12f);
+        }
+        sd->left[(size_t) i] = out[0] * 0.8f + out[1] * 0.4f;
+        sd->right[(size_t) i] = out[0] * 0.4f + out[1] * 0.8f;
+    }
+    finish (*sd);
+    return sd;
+}
+
+// 11: a breath flute: airy notes on A and E with a chiff at the start of each.
+inline std::unique_ptr<SampleData> breathFlute()
+{
+    auto sd = blank (8.0);
+    Random rng (0xF107u);
+    const float notes[] { 69.0f, 76.0f, 81.0f, 76.0f, 69.0f };
+    for (int nI = 0; nI < 5; ++nI)
+    {
+        const float t0 = 0.05f + 1.55f * (float) nI, len = 1.75f;
+        const float f = hz (notes[nI]);
+        Svf air, chiff;
+        air.set (f, 9.0f, (float) fs); chiff.set (f * 3.0f, 2.0f, (float) fs);
+        const float pan = (float) (nI % 2 == 0 ? -0.3f : 0.3f);
+        const int start = (int) (t0 * fs), end = std::min (sd->length(), (int) ((t0 + len + 0.5f) * fs));
+        for (int i = start; i < end; ++i)
+        {
+            const float t = (float) (i - start) / (float) fs;
+            const float env = std::min (1.0f, t / 0.14f) * (t < len ? 1.0f : std::exp (-(t - len) / 0.12f));
+            const float vib = t > 0.5f ? 0.004f * std::min (1.0f, (t - 0.5f) * 2.0f) * std::sin (kTwoPi * 5.0f * t) : 0.0f;
+            const float n = rng.next();
+            float lp;
+            const float breath = air.process (n, lp) / 9.0f * 3.0f;
+            const float ch = chiff.process (n, lp) * std::exp (-t / 0.03f) * 0.5f;
+            const float tone = std::sin (kTwoPi * f * (1.0f + vib) * t) + 0.18f * std::sin (kTwoPi * 2.0f * f * (1.0f + vib) * t);
+            const float s = (tone * 0.75f + breath * 0.5f + ch) * env * 0.16f;
+            sd->left[(size_t) i] += s * (1.0f - pan); sd->right[(size_t) i] += s * (1.0f + pan);
+        }
+    }
+    finish (*sd);
+    return sd;
+}
+
+// 12: a low choir that leans between vowels, a little wrong, a little alive.
+inline std::unique_ptr<SampleData> slimeChoir()
+{
+    auto sd = blank (10.0);
+    const float notes[] { 45.0f, 52.0f, 57.0f, 64.0f };
+    voxVoices (*sd, notes, 4, 28.0f, 0.31f, 0x511Eu);
+    finish (*sd);
+    return sd;
+}
 } // namespace sounds
 
 inline std::unique_ptr<SampleData> makeBuiltInSound (int index)
@@ -360,6 +495,11 @@ inline std::unique_ptr<SampleData> makeBuiltInSound (int index)
         case 5: return sounds::windOrgan();
         case 6: return sounds::stringDust();
         case 7: return sounds::tunedRain();
+        case 8: return sounds::kalimba();
+        case 9: return sounds::singingBowl();
+        case 10: return sounds::whaleGlass();
+        case 11: return sounds::breathFlute();
+        case 12: return sounds::slimeChoir();
         default: return sounds::glassChoir();
     }
 }

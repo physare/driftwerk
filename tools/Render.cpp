@@ -61,6 +61,7 @@ int main (int argc, char** argv)
     }
     const double sr = 48000.0;
     const int block = 512;
+    proc.organism.manual = std::getenv ("DW_THREAD") == nullptr;   // the organism grows in step with the render, not on its own thread
     proc.setPlayConfigDetails (0, 2, sr, block);
     proc.prepareToPlay (sr, block);
 
@@ -70,8 +71,11 @@ int main (int argc, char** argv)
     float peak = 0; double rms = 0;
     const bool trace = std::getenv ("DW_TRACE") != nullptr;   // print each chord change
     int lastSig = -1;
+    double organismClock = 0.0;
     for (int pos = 0; pos + block <= all.getNumSamples(); pos += block)
     {
+        organismClock += block / sr;
+        while (organismClock >= 1.0 / 30.0) { organismClock -= 1.0 / 30.0; if (proc.organism.manual) proc.organism.tick(); }
         buf.clear();
         proc.processBlock (buf, midi);
         if (trace)
@@ -100,6 +104,9 @@ int main (int argc, char** argv)
     }
     rms = std::sqrt (rms / (2.0 * all.getNumSamples()));
     std::printf ("program %d peak %.3f rms %.4f\n", program, peak, rms);
+    std::printf ("slime notes %d (ear events %d)  pulse hits %d %d %d %d %d  texture events %d  memory %.1fs\n", proc.slimeNotes.load(),
+                 proc.organism.totalHits.load(), proc.pulseLaneHits[0].load(), proc.pulseLaneHits[1].load(), proc.pulseLaneHits[2].load(),
+                 proc.pulseLaneHits[3].load(), proc.pulseLaneHits[4].load(), proc.texEvents.load(), proc.memSeconds.load());
 
     const juce::String tag = std::getenv ("DW_TAG") ? juce::String (std::getenv ("DW_TAG")) : juce::String (program);
     juce::File wav (outDir + "/render_" + tag + ".wav");
