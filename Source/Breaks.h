@@ -177,7 +177,8 @@ struct BreakPlayer
     int hits = 0;
 
     void prepare (float sampleRate) { sr = sampleRate; for (auto& x : v) x.on = false; cur = -1; rollLeft = 0; }
-    bool busy() const { for (auto& x : v) if (x.on) return true; return false; }
+    // A roll counts as busy even between its hits: process() is what moves it on.
+    bool busy() const { if (rollLeft > 0) return true; for (auto& x : v) if (x.on) return true; return false; }
 
     // k: the sixteenth (absolute); stepSamples: its length now; rate: playback speed.
     // inSync: the rate makes one slice last exactly one step (FOLLOW TEMPO, no PITCH), so slices

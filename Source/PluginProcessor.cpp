@@ -2898,9 +2898,9 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
                 breakLastK = k16;
             }
         }
-        else breakLastK = pulseNoStep;
+        else { breakLastK = pulseNoStep; breakPlayer.rollLeft = 0; }
     }
-    else { pulseLastK = pulseNoStep; breakLastK = pulseNoStep; }
+    else { pulseLastK = pulseNoStep; breakLastK = pulseNoStep; breakPlayer.rollLeft = 0; }
     if (p.pulseOn || pulseDrums.busy() || breakPlayer.busy())
     {
         float a = 0.0f, b = 0.0f;
