@@ -76,7 +76,7 @@ public:
 
     // Analysis results (read by the audio thread)
     std::atomic<float> handX { 0.0f }, handY { 0.0f }, motion { 0.0f };
-    std::atomic<int> triggerCount { 0 };
+    std::atomic<int> triggerCount { 0 }, waveCount { 0 };
     std::atomic<float> sensitivity { 0.5f };
     juce::String status { "CAMERA OFF" };
     HandTracker hand;
@@ -134,7 +134,7 @@ public:
         }
 
         if (! armed && amount < 0.08f) armed = true;
-        if (armed && amount > 0.25f) { armed = false; triggerCount.fetch_add (1); }
+        if (armed && amount > 0.25f) { armed = false; triggerCount.fetch_add (1); waveCount.fetch_add (1); }
 
         // With the hand skeleton running, HAND X/Y follow the palm itself, and a pinch also triggers.
         if (hand.present.load())

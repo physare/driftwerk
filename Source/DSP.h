@@ -363,13 +363,13 @@ struct HallReverb
     // Octave-up pitch shifter (two crossfaded taps) used to feed the shimmer.
     DelayLine shimLine;
     double shimPh = 0.0;
-    float lastWet = 0.0f, shimLp = 0.0f;
+    float lastWet = 0.0f, shimLp = 0.0f, wetEnv = 0.0f;
 
     void process (float& l, float& r, float size, float damping, float mix, float shimmer = 0.0f)
     {
         if (shimLine.buf.empty()) shimLine.prepare ((int) (sr * 0.2f));
         const float scale = 0.55f + size * 1.0f;
-        const float rt60 = 1.2f + size * size * 38.0f; // up to ~40 s tail
+        const float rt60 = 1.2f + size * size * 18.0f; // up to ~19 s tail
         for (int i = 0; i < N; ++i)
             gains[i] = std::pow (10.0f, -3.0f * (lens[i] * scale) / (sr * rt60));
 
@@ -423,8 +423,13 @@ struct HallReverb
             lines[i].push (damp[i] + ((i & 1) ? in : -in) * 0.5f);
         }
 
-        const float wl = (o[0] + o[2] + o[4] + o[6]) * 0.45f;
-        const float wr = (o[1] + o[3] + o[5] + o[7]) * 0.45f;
+        float wl = (o[0] + o[2] + o[4] + o[6]) * 0.45f;
+        float wr = (o[1] + o[3] + o[5] + o[7]) * 0.45f;
+        // A long hall fed a steady drone keeps piling up energy. A slow leveller on the
+        // wet signal keeps the tail lush but never lets it swamp the mix.
+        wetEnv += (std::abs (wl) + std::abs (wr) - wetEnv) * (1.0f / (0.4f * sr));
+        const float wetGain = wetEnv > 0.5f ? 0.5f / wetEnv : 1.0f;
+        wl *= wetGain; wr *= wetGain;
         lastWet = 0.5f * (wl + wr);
         l = l * (1.0f - mix * 0.5f) + wl * mix;
         r = r * (1.0f - mix * 0.5f) + wr * mix;

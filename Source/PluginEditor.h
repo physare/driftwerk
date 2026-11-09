@@ -152,6 +152,49 @@ public:
 };
 
 //==============================================================================
+// The performance panel over the slime mold: step sequence, arp sound, drone, harmony.
+// The ORGANISM tab shows the slime on its own.
+class PerformPanel : public juce::Component
+{
+public:
+    PerformPanel (DriftwerkProcessor& p, MainView& v);
+    void paint (juce::Graphics&) override;
+    bool hitTest (int x, int y) override { return tab != Organism || y < 34; }
+    void mouseDown (const juce::MouseEvent&) override;
+    void mouseDrag (const juce::MouseEvent&) override;
+    void mouseUp (const juce::MouseEvent&) override;
+    void refresh();                                    // called by the UI timer
+
+    enum Tab { Sequence, ArpSound, Drone, Harmony, Organism };
+    void setTab (int t);
+
+private:
+    DriftwerkProcessor& proc;
+    MainView& view;
+    int tab = Sequence;
+
+    struct Lab { juce::Rectangle<int> r; juce::String t; int tab; };
+    std::vector<Lab> labs;
+    std::vector<std::pair<juce::Component*, int>> tabbed;   // control, tab it belongs to
+    std::vector<std::unique_ptr<juce::Component>> owned;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sAtt;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> cAtt;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> bAtt;
+    juce::TextButton tabButtons[5];
+    juce::TextButton holdButton { "HOLD" }, recButton { "REC NOTES" }, newButton { "NEW" }, clearButton { "CLEAR" },
+                     leftButton { "<" }, rightButton { ">" }, saveButton { "SAVE" };
+    juce::TextButton slotButtons[DriftwerkProcessor::numSlots];
+    int lastSlot = -1;
+
+    void knob (const char* param, const char* label, int tabId, int x, int y);
+    void combo (const char* param, const char* label, int tabId, int x, int y, int w);
+    juce::Rectangle<int> grid() const { return { 14, 74, getWidth() - 28, 186 }; }
+    int colAt (int x) const;
+    int degAt (int y) const;
+    int dragCol = -1, dragStartY = 0; bool dragMoved = false;
+};
+
+//==============================================================================
 // The whole instrument, laid out at a fixed design size; the editor scales it.
 class MainView : public juce::Component, private juce::Timer, public juce::FileDragAndDropTarget
 {
@@ -179,6 +222,7 @@ public:
 
     void refreshNow() { timerCallback(); } // used by the offline render tool
     void showFullCamera() { openFullCamera (true); } // used by the offline render tool
+    void showPerformTab (int t);
     void advanceSlime (int steps) { for (int i = 0; i < steps; ++i) slime->advance(); }
 
     DriftwerkProcessor& proc;
@@ -225,6 +269,9 @@ private:
     std::unique_ptr<SlimeView> slime;
     std::unique_ptr<GrainView> grainView;
     std::unique_ptr<FullCameraView> fullCam;
+    std::unique_ptr<PerformPanel> perform;
+    friend class PerformPanel;
+    juce::TextButton recordButton { "REC" }, filesButton { "RECORDINGS" };
     juce::TextButton fullButton { "FULL SCREEN CAMERA" };
     void openFullCamera (bool open);
     juce::Rectangle<int> arpLedArea, slimeRect, playRect;

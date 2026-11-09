@@ -742,6 +742,9 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     slime = std::make_unique<SlimeView> (proc);
     slime->setBounds (slimeRect);
     addAndMakeVisible (*slime);
+    perform = std::make_unique<PerformPanel> (proc, *this);
+    perform->setBounds (slimeRect);
+    addAndMakeVisible (*perform);
 
     playRect = { 1276, t0, 224, rowHeight (0) };
     sceneButton.setBounds (playRect.getX() + 16, t0 + 124, 192, 34);
@@ -789,6 +792,20 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     cables = std::make_unique<CableLayer> (*this);
     addAndMakeVisible (*cables);
 
+    recordButton.getProperties().set ("accent", true);
+    recordButton.onClick = [this]
+    {
+        if (proc.isRecording()) { proc.stopRecording(); recordButton.setToggleState (false, juce::dontSendNotification); recordButton.setButtonText ("REC"); }
+        else if (proc.startRecording()) recordButton.setToggleState (true, juce::dontSendNotification);
+    };
+    filesButton.onClick = [this]
+    {
+        auto dir = juce::File::getSpecialLocation (juce::File::userMusicDirectory).getChildFile ("Timewind");
+        dir.createDirectory();
+        if (proc.lastRecording.existsAsFile()) proc.lastRecording.revealToUser(); else dir.startAsProcess();
+    };
+    addAndMakeVisible (recordButton);
+    addAndMakeVisible (filesButton);
     fullButton.onClick = [this] { openFullCamera (true); };
     fullButton.getProperties().set ("accent", true);
     addAndMakeVisible (fullButton);
@@ -920,8 +937,8 @@ void MainView::paint (juce::Graphics& g)
     g.drawText ("Grow sound with your hands.", 150, 8, 260, 40, juce::Justification::centredLeft);
     g.setColour (fg3);
     g.setFont (dwui::font (11.0f));
-    g.drawFittedText ("drag jack to jack to patch  /  right-click a jack to unplug\nright-click a knob to play it by hand",
-                      350, 8, 360, 40, juce::Justification::centredLeft, 2);
+    g.drawFittedText ("drag jacks to patch, right-click to unplug\nright-click a knob to play it by hand",
+                      330, 8, 205, 40, juce::Justification::centredLeft, 2);
     g.setColour (rule);
     g.drawHorizontalLine (52, 0.0f, (float) getWidth());
 
@@ -1002,6 +1019,8 @@ void MainView::paint (juce::Graphics& g)
         }
 }
 
+void MainView::showPerformTab (int t) { perform->setTab (t); }
+
 void MainView::openFullCamera (bool open)
 {
     fullCam->setVisible (open);
@@ -1013,6 +1032,8 @@ void MainView::resized()
     cables->setBounds (getLocalBounds());
     fullCam->setBounds (getLocalBounds());
     fullButton.setBounds (getWidth() - 780, 14, 170, 26);
+    recordButton.setBounds (getWidth() - 958, 14, 86, 26);
+    filesButton.setBounds (getWidth() - 868, 14, 84, 26);
     presetBox.setBounds (getWidth() - 600, 14, 200, 26);
     randomButton.setBounds (getWidth() - 390, 14, 130, 26);
     clearButton.setBounds (getWidth() - 252, 14, 100, 26);
@@ -1048,7 +1069,9 @@ void MainView::showModMenu (ModSlider& s)
 
     struct Src { int out; const char* name; };
     const Src handSources[] { { O_CAM_X, "Hand X  (left / right)" }, { O_CAM_Y, "Hand Y  (up / down)" },
-                              { O_CAM_MOTION, "Hand motion  (how much you move)" } };
+                              { O_CAM_MOTION, "Hand motion  (how much you move)" },
+                              { O_CAM_PINCH, "Pinch  (thumb to index finger)" }, { O_CAM_SPREAD, "Spread  (fingers fanned open)" },
+                              { O_CAM_FIST, "Fist  (fingers curled)" }, { O_CAM_TILT, "Tilt  (hand leaning)" } };
     const Src otherSources[] { { O_LFO1, "LFO 1" }, { O_LFO2, "LFO 2" }, { O_SNH, "S&H random" },
                                { O_ENV2, "ENV 2" }, { O_ARP_RND, "Arp random" } };
 
@@ -1140,6 +1163,12 @@ void MainView::refreshPatch()
 
 void MainView::timerCallback()
 {
+    perform->refresh();
+    if (proc.isRecording())
+    {
+        const int secs = (int) proc.recordingSeconds();
+        recordButton.setButtonText (juce::String::formatted ("REC %d:%02d", secs / 60, secs % 60));
+    }
     if (dragOut < 0 && dragIn < 0)
     {
         const auto ps = proc.getPatchString();
@@ -1184,6 +1213,265 @@ void MainView::timerCallback()
     repaint (arpLedArea.expanded (8));
     repaint (playRect.withTrimmedTop (250));
     for (auto& r : moduleLedAreas) if (! r.isEmpty()) repaint (r.expanded (10));
+}
+
+//==============================================================================
+PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view (v)
+{
+    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "HARMONY", "ORGANISM" };
+    for (int t = 0; t < 5; ++t)
+    {
+        tabButtons[t].setButtonText (tabNames[t]);
+        tabButtons[t].setBounds (700 - 5 * 88 + t * 88 - 8, 6, 84, 22);
+        tabButtons[t].onClick = [this, t] { setTab (t); };
+        addAndMakeVisible (tabButtons[t]);
+    }
+
+    // ---- SEQUENCE tab
+    int x = 14;
+    auto place = [&] (juce::TextButton& b, int w) { b.setBounds (x, 40, w, 24); x += w + 6; addAndMakeVisible (b); tabbed.push_back ({ &b, Sequence }); };
+    place (holdButton, 58);
+    holdButton.setClickingTogglesState (true);
+    bAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "arp.hold", holdButton));
+    place (recButton, 84);
+    recButton.getProperties().set ("accent", true);
+    recButton.onClick = [this] { proc.setRecordNotes (! proc.recordNotes.load()); };
+    place (newButton, 46);
+    newButton.onClick = [this] { proc.newRandomSequence(); proc.setStep (0, proc.stepNote[0].load(), true); lastSlot = -1; };
+    place (clearButton, 54);
+    clearButton.onClick = [this] { for (int i = 0; i < DriftwerkProcessor::numSteps; ++i) proc.setStep (i, 0, i == 0); lastSlot = -1; };
+    place (leftButton, 26);
+    place (rightButton, 26);
+    auto shift = [this] (int dir)
+    {
+        const int len = proc.arpLength.load();
+        std::vector<std::pair<int, bool>> s ((size_t) len);
+        for (int i = 0; i < len; ++i) s[(size_t) i] = { proc.stepNote[(size_t) i].load(), proc.stepOn[(size_t) i].load() };
+        for (int i = 0; i < len; ++i) { const auto& src = s[(size_t) ((i - dir + len) % len)]; proc.setStep (i, src.first, src.second); }
+    };
+    leftButton.onClick = [shift] { shift (-1); };
+    rightButton.onClick = [shift] { shift (1); };
+    x += 14;
+    for (int i = 0; i < DriftwerkProcessor::numSlots; ++i)
+    {
+        slotButtons[i].setButtonText (juce::String (i + 1));
+        place (slotButtons[i], 28);
+        slotButtons[i].onClick = [this, i]
+        {
+            if (saveButton.getToggleState()) { proc.storeSlot (i); saveButton.setToggleState (false, juce::dontSendNotification); lastSlot = i; }
+            else if (proc.recallSlot (i)) lastSlot = i;
+        };
+    }
+    place (saveButton, 52);
+    saveButton.setClickingTogglesState (true);
+
+    // ---- ARP SOUND tab: the usual arp voice (VCO > VCF 1 > VCA 1), all in one place
+    {
+        const std::pair<const char*, const char*> k[] { { "arp.oct", "OCTAVE" }, { "arp.glide", "GLIDE" }, { "env1.a", "SOFT" },
+            { "env1.d", "PLUCK" }, { "vcf1.cut", "BRIGHT" }, { "vcf1.res", "RESO" }, { "vcf1.drive", "DRIVE" },
+            { "vco2.fine", "DETUNE" }, { "echo.mix", "ECHO" }, { "out.lvl1", "LEVEL" } };
+        for (int i = 0; i < 10; ++i) knob (k[i].first, k[i].second, ArpSound, 30 + (i % 5) * 132, 62 + (i / 5) * 104);
+    }
+    // ---- DRONE tab
+    {
+        combo ("drn.chord", "CHORD", Drone, 30, 66, 92);
+        const std::pair<const char*, const char*> k[] { { "drn.oct", "OCTAVE" }, { "drn.detune", "DETUNE" }, { "drn.drift", "DRIFT" },
+            { "drn.level", "LEVEL" }, { "drn.tone", "TONE" }, { "drn.wave", "SAW > SOFT" }, { "drn.breath", "BREATH" },
+            { "drn.air", "AIR" }, { "drn.sub", "SUB" } };
+        for (int i = 0; i < 9; ++i) { const int c = i + 1; knob (k[i].first, k[i].second, Drone, 30 + (c % 5) * 132, 62 + (c / 5) * 104); }
+    }
+    // ---- HARMONY tab
+    combo ("prog.mode", "PROGRESSION", Harmony, 20, 70, 120);
+    combo ("prog.bars", "CHANGE EVERY", Harmony, 152, 70, 100);
+    knob ("prog.glide", "CHORD GLIDE", Harmony, 280, 62);
+    combo ("scene.key", "NEW SCENE KEY", Harmony, 400, 70, 100);
+    combo ("arp.follow", "ARP FOLLOWS", Harmony, 520, 70, 90);
+    combo ("arp.scale", "SCALE", Harmony, 20, 168, 120);
+    knob ("arp.root", "KEY", Harmony, 166, 160);
+
+    setTab (Sequence);
+}
+
+void PerformPanel::knob (const char* param, const char* label, int tabId, int x, int y)
+{
+    auto s = std::make_unique<ModSlider>();
+    s->paramIndex = proc.paramIndex (param);
+    auto* raw = s.get();
+    s->onRightClick = [this, raw] { view.showModMenu (*raw); };
+    s->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
+    s->setPopupDisplayEnabled (true, true, &view, 900);
+    s->setBounds (x + 22, y, 50, 50);
+    s->setMouseDragSensitivity (220);
+    addAndMakeVisible (*s);
+    sAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, param, *s));
+    tabbed.push_back ({ s.get(), tabId });
+    labs.push_back ({ { x - 6, y + 54, 106, 14 }, label, tabId });
+    owned.push_back (std::move (s));
+}
+
+void PerformPanel::combo (const char* param, const char* label, int tabId, int x, int y, int w)
+{
+    auto cb = std::make_unique<juce::ComboBox>();
+    if (auto* pc = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (param)))
+        cb->addItemList (pc->choices, 1);
+    cb->setBounds (x, y, w, 24);
+    addAndMakeVisible (*cb);
+    cAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, param, *cb));
+    tabbed.push_back ({ cb.get(), tabId });
+    labs.push_back ({ { x - 10, y + 30, w + 20, 14 }, label, tabId });
+    owned.push_back (std::move (cb));
+}
+
+void PerformPanel::setTab (int t)
+{
+    tab = t;
+    for (int i = 0; i < 5; ++i) tabButtons[i].setToggleState (i == t, juce::dontSendNotification);
+    for (auto& [c, ct] : tabbed) c->setVisible (ct == t);
+    repaint();
+}
+
+void PerformPanel::refresh()
+{
+    recButton.setToggleState (proc.recordNotes.load(), juce::dontSendNotification);
+    for (int i = 0; i < DriftwerkProcessor::numSlots; ++i)
+    {
+        slotButtons[i].getProperties().set ("accent", proc.slotUsed (i));
+        slotButtons[i].setToggleState (i == lastSlot, juce::dontSendNotification);
+    }
+    if (tab == Sequence || tab == Harmony) repaint();
+}
+
+int PerformPanel::colAt (int x) const
+{
+    const auto g = grid();
+    return juce::jlimit (0, DriftwerkProcessor::numSteps - 1, (x - g.getX()) * DriftwerkProcessor::numSteps / g.getWidth());
+}
+
+int PerformPanel::degAt (int y) const
+{
+    const auto g = grid().withTrimmedTop (16).withTrimmedBottom (16);
+    const int maxDeg = juce::jmax (1, proc.maxDegree());
+    return juce::jlimit (0, maxDeg, juce::roundToInt ((float) (g.getBottom() - y) / (float) g.getHeight() * (float) maxDeg));
+}
+
+void PerformPanel::mouseDown (const juce::MouseEvent& e)
+{
+    dragCol = -1;
+    if (tab != Sequence || ! grid().contains (e.getPosition())) return;
+    dragCol = colAt (e.x); dragStartY = e.y; dragMoved = false;
+}
+
+void PerformPanel::mouseDrag (const juce::MouseEvent& e)
+{
+    if (dragCol < 0) return;
+    if (! dragMoved && std::abs (e.y - dragStartY) < 4 && colAt (e.x) == dragCol) return;
+    dragMoved = true;
+    proc.setStep (colAt (e.x), degAt (e.y), true);   // drag to draw notes, across steps too
+    lastSlot = -1;
+    repaint();
+}
+
+void PerformPanel::mouseUp (const juce::MouseEvent& e)
+{
+    if (dragCol >= 0 && ! dragMoved && grid().contains (e.getPosition()))
+    {
+        const int c = dragCol;
+        proc.setStep (c, proc.stepNote[(size_t) c].load(), ! proc.stepOn[(size_t) c].load());
+        lastSlot = -1;
+        repaint();
+    }
+    dragCol = -1;
+}
+
+void PerformPanel::paint (juce::Graphics& g)
+{
+    using namespace dwui;
+    if (tab == Organism) return;      // the slime shows through untouched
+    g.setColour (juce::Colours::black.withAlpha (0.74f));
+    g.fillRect (getLocalBounds());
+    g.setColour (juce::Colours::black.withAlpha (0.9f));           // keep the slime's own captions out of the way
+    g.fillRect (getLocalBounds().removeFromTop (34));
+    g.fillRect (getLocalBounds().removeFromBottom (28));
+    g.setColour (rule);
+    g.drawRect (getLocalBounds(), 1);
+
+    const char* titles[] { "Sequence", "Arp sound", "Drone", "Harmony" };
+    const char* subs[] { "HOLD keeps the pattern. Click a step on/off, drag to set its note, REC NOTES to play it in.",
+                         "shapes the arp voice: VCO > VCF 1 > VCA 1 (in most presets)",
+                         "six drifting voices: shape, breath and air",
+                         "chords that move together: pads, drone and arp" };
+    g.setColour (fg);
+    g.setFont (dwui::font (15.0f));
+    g.drawText (titles[tab], 14, 8, 200, 20, juce::Justification::left);
+    g.setColour (fg3);
+    g.setFont (dwui::font (10.5f));
+    g.drawText (subs[tab], 14, getHeight() - 22, getWidth() - 28, 14, juce::Justification::left);
+
+    g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
+    for (auto& l : labs)
+        if (l.tab == tab) { g.setColour (fg2); g.drawText (l.t, l.r, juce::Justification::centred); }
+
+    if (tab == Sequence)
+    {
+        const auto gr = grid();
+        const int n = DriftwerkProcessor::numSteps, len = proc.arpLength.load(), cur = proc.arpStep.load();
+        const int maxDeg = juce::jmax (1, proc.maxDegree());
+        const float cw = (float) gr.getWidth() / (float) n;
+        const auto inner = gr.withTrimmedTop (16).withTrimmedBottom (16).toFloat();
+        const bool held = proc.apvts.getRawParameterValue ("arp.hold")->load() > 0.5f || proc.recordNotes.load();
+        for (int i = 0; i < n; ++i)
+        {
+            const auto col = juce::Rectangle<float> (gr.getX() + cw * (float) i, (float) gr.getY(), cw, (float) gr.getHeight()).reduced (3.0f, 0.0f);
+            const bool inLen = i < len, on = proc.stepOn[(size_t) i].load();
+            const int deg = proc.stepNote[(size_t) i].load();
+            const float y = inner.getBottom() - inner.getHeight() * (float) juce::jmin (deg, maxDeg) / (float) maxDeg;
+            g.setColour (juce::Colours::white.withAlpha (inLen ? 0.05f : 0.015f));
+            g.fillRect (col);
+            if (i == cur && inLen) { g.setColour (acid.withAlpha (0.16f)); g.fillRect (col); }
+            const auto bar = juce::Rectangle<float> (col.getX() + 4, y, col.getWidth() - 8, inner.getBottom() - y + 2);
+            if (on && inLen)
+            {
+                g.setColour (acid.withAlpha (i == cur ? 1.0f : (held ? 0.75f : 0.45f)));
+                g.fillRect (bar.withHeight (juce::jmin (bar.getHeight(), 5.0f)));
+                g.setColour (acid.withAlpha (i == cur ? 0.45f : 0.2f));
+                g.fillRect (bar.withTrimmedTop (5.0f));
+            }
+            else
+            {
+                g.setColour (fg3.withAlpha (inLen ? 0.6f : 0.2f));
+                g.drawRect (bar.withHeight (5.0f), 1.0f);
+            }
+            g.setColour (inLen ? (on ? fg2 : fg3) : fg3.withAlpha (0.3f));
+            g.setFont (dwui::mono (9.0f));
+            g.drawText (proc.degreeName (deg), col.withHeight (14.0f).toNearestInt(), juce::Justification::centred);
+            g.drawText (juce::String (i + 1), col.withTrimmedTop (col.getHeight() - 13.0f).toNearestInt(), juce::Justification::centred);
+        }
+        g.setColour (fg3);
+        g.setFont (dwui::font (10.0f));
+        g.drawText (held ? (proc.recordNotes.load() ? "recording: play your keyboard" : "held") : "free: the arp keeps changing it",
+                    gr.getRight() - 220, 8, 220, 20, juce::Justification::right);
+    }
+    else if (tab == Harmony)
+    {
+        // The four chords of the progression, the one playing now lit.
+        const int mode = (int) std::lround (proc.apvts.getRawParameterValue ("prog.mode")->load());
+        const int idx = proc.progIndex.load();
+        g.setFont (dwui::font (11.0f));
+        g.setColour (fg3);
+        g.drawText (mode == 0 ? "progression off: pads and drone stay on one chord" : "now playing", 250, 168, 300, 16, juce::Justification::left);
+        if (mode > 0)
+            for (int k = 0; k < 4; ++k)
+            {
+                const auto r = juce::Rectangle<int> (250 + k * 104, 190, 96, 40);
+                const bool now = k == idx;
+                g.setColour (now ? acid : rule);
+                g.drawRect (r, 1);
+                if (now) { g.setColour (acid.withAlpha (0.15f)); g.fillRect (r.reduced (1)); }
+                g.setColour (now ? acid : fg2);
+                g.setFont (dwui::font (13.0f));
+                g.drawText (proc.progressionChordName (k), r, juce::Justification::centred);
+            }
+    }
 }
 
 //==============================================================================

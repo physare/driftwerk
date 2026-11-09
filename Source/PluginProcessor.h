@@ -1,6 +1,7 @@
 #pragma once
 
 #include <juce_audio_processors/juce_audio_processors.h>
+#include <juce_audio_formats/juce_audio_formats.h>
 #include <atomic>
 #include <unordered_map>
 #include "DSP.h"
@@ -82,11 +83,66 @@ public:
     void rollScene();
     std::atomic<int> sceneCounter { 0 };
 
+    //==========================================================================
+    // Step sequence (the arp's 16 steps). In HOLD the pattern repeats exactly and can be
+    // edited; otherwise the arp keeps mutating it. Notes are scale/chord degrees, so they
+    // always follow the HARMONY setting.
+    static constexpr int numSteps = 16, numSlots = 8;
+    std::array<std::atomic<int>, numSteps> stepNote;
+    std::array<std::atomic<bool>, numSteps> stepOn;
+    void setStep (int i, int degree, bool on);          // message thread; switches HOLD on
+    juce::String getSequenceString() const;
+    void setSequenceString (const juce::String&);
+    void newRandomSequence();
+    int maxDegree() const;                               // highest degree reachable with the current RANGE
+    juce::String degreeName (int degree) const;          // e.g. "D#3"
+
+    // Saved sequences, shared by every Timewind on this computer.
+    void storeSlot (int slot);
+    bool recallSlot (int slot);
+    bool slotUsed (int slot) const { return slot >= 0 && slot < numSlots && slots[slot].isNotEmpty(); }
+
+    // Play notes on a MIDI keyboard into the running sequence.
+    std::atomic<bool> recordNotes { false };
+
+    // Chord progression state for the editor: current chord (0..3, -1 off), its pad chord and root offset.
+    std::atomic<int> progIndex { -1 }, progChord { 1 }, progOffset { 0 };
+    juce::String progressionChordName (int k) const;
+    void setRecordNotes (bool on);
+
+    //==========================================================================
+    // Record everything Timewind plays to a WAV file (Music/Timewind).
+    bool startRecording();
+    void stopRecording();
+    bool isRecording() const { return activeWriter.load() != nullptr; }
+    double recordingSeconds() const { return recordedSamples.load() / juce::jmax (1.0, sr); }
+    juce::File lastRecording;
+
     static constexpr int scopeSize = 1024;
     float scope[scopeSize] {};
     std::atomic<int> scopeWrite { 0 };
 
 private:
+    juce::StringArray slots;
+    juce::File slotsFile() const;
+    void loadSlots();
+    void saveSlots() const;
+    bool holdLatched = false;
+    int pendingRecStep = -1, pendingRecNote = 0;
+    int pitchSetFromParams (int* out) const;
+
+    juce::TimeSliceThread writerThread { "Timewind recorder" };
+    std::unique_ptr<juce::AudioFormatWriter::ThreadedWriter> threadedWriter;
+    juce::CriticalSection writerLock;
+    std::atomic<juce::AudioFormatWriter::ThreadedWriter*> activeWriter { nullptr };
+    std::atomic<double> recordedSamples { 0.0 };
+
+    // Drone voice shaping state
+    float droneBreathPh[6] {}, droneSubPh = 0.0f, droneLp = 0.0f, droneAirLp = 0.0f, droneAirHp = 0.0f;
+    float arpGlided = 0.0f;
+    int chordOffsetTarget = 0;
+    float chordOffsetNow = 0.0f, chordGlideCoef = 1.0f;
+
     void renderSample (float& outL, float& outR);
     void updateBlockParams();
     std::unordered_map<std::string, int> paramIndexMap;
@@ -113,7 +169,7 @@ private:
     // Random arpeggiator (shift-register style)
     struct Arp
     {
-        int degree[16] {};
+        // degrees live in stepNote / stepOn (public, shared with the editor)
         bool gate[16] {};
         float rnd[16] {};
         int step = 0;
@@ -181,7 +237,9 @@ private:
         int clkDiv = 3; float clkBpm = 100; bool clkRun = true;
         int scale = 0, root = 36, range = 2, length = 16;
         float density = 0.85f, mutate = 0.15f, walk = 0.6f, gateLen = 0.5f;
-        bool arpOn = true; int arpFollow = 1;
+        bool arpOn = true; int arpFollow = 1; bool hold = false; int arpOct = 0; float glide = 0.0f;
+        float droneTone = 1.0f, droneWave = 0.0f, droneBreath = 0.0f, droneAir = 0.0f, droneSub = 0.0f;
+        int progMode = 0, progBars = 8; float progGlide = 0.2f;
         int vco1Oct = 0, vco2Oct = 0; float vco1Fine = 0, vco2Fine = 0, vco1Pw = 0.5f, vco2Pw = 0.5f;
         float vco1Pwm = 0.5f, vco2Pwm = 0.5f, vco1Fm = 0.0f, vco2Fm = 0.0f;
         int droneChord = 1, droneOct = 0; float droneDetune = 0.4f, droneDriftAmt = 0.4f, droneLevel = 0.6f;

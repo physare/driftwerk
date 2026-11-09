@@ -61,6 +61,18 @@ You see the bones drawn over your hand in the HAND preview and the full-screen c
 In Hand Play, pinch adds shimmer and grains, spreading opens up the space, a fist hushes the arp and darkens, and tilt scans the grains.
 They are also mod sources: right-click any knob.
 
+## Performance panel (top middle)
+
+The panel over the slime mold has five tabs:
+
+* **SEQUENCE**: the arp's 16 steps. **HOLD** freezes the pattern so it repeats exactly. Click a step to switch it on or off, drag up and down to set its note (drag across steps to draw a line). **REC NOTES** lets you play a MIDI keyboard into the running sequence. **NEW** writes a fresh singable pattern, **CLEAR** empties it, **< >** shift it. **SAVE** then a number stores the sequence in that slot; a number on its own recalls it. Slots are shared by every Timewind on your computer.
+* **ARP SOUND**: octave, glide, soft attack, pluck length, brightness, resonance, drive, detune, echo and level of the arp voice.
+* **DRONE**: chord, octave, detune, drift, level, tone, saw-to-soft wave, breath (each voice swells on its own slow cycle), air (breathy noise) and sub.
+* **HARMONY**: chord progressions. PEACEFUL, DREAMY and DRIFTING move pads, drone and arp together through chords that stay in key, every 1 to 16 bars. CREEPY slides between outside chords. CHORD GLIDE sets how slowly they slide. NEW SCENE KEY decides whether a new scene keeps the key, moves to a nearby key or jumps anywhere.
+* **ORGANISM**: just the slime mold.
+
+**REC** in the header records everything Timewind plays to a WAV file in Music\Timewind. **RECORDINGS** opens that folder.
+
 ## Random Arp
 
 * **ON** turns the plucks on and off. The pads and drone keep going.

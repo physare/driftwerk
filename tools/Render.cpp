@@ -107,6 +107,7 @@ int main (int argc, char** argv)
         {
             de->view.advanceSlime (600);
             if (std::getenv ("DW_FULL")) de->view.showFullCamera();
+            if (auto* t = std::getenv ("DW_TAB")) de->view.showPerformTab (juce::String (t).getIntValue());
             de->refreshNow();
         }
         ed->setSize (MainView::designW, MainView::designH);
