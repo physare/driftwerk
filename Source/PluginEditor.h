@@ -120,6 +120,36 @@ public:
 };
 
 //==============================================================================
+// Full-window camera stage: big mirrored live image, slime mold over it, motion
+// highlights so you can see every finger move, and the hand-play controls.
+class FullCameraView : public juce::Component
+{
+public:
+    FullCameraView (DriftwerkProcessor& p, SlimeView& s);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    bool keyPressed (const juce::KeyPress& k) override
+    {
+        if (k == juce::KeyPress::escapeKey) { if (onClose) onClose(); return true; }
+        return false;
+    }
+    std::function<void()> onClose;
+    DriftwerkProcessor& proc;
+    SlimeView& slime;
+    juce::Rectangle<float> stage;
+
+    std::vector<std::unique_ptr<juce::Slider>> knobs;
+    std::vector<std::unique_ptr<juce::ToggleButton>> toggles;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> knobAtt;
+    std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> toggleAtt;
+    juce::TextButton closeButton { "BACK TO RACK" }, sceneButton { "NEW SCENE" };
+    struct Lab { juce::Rectangle<int> r; juce::String t; };
+    std::vector<Lab> labs;
+    float trailX[24] {}, trailY[24] {}; int trailPos = 0;
+    void pushTrail();
+};
+
+//==============================================================================
 // The whole instrument, laid out at a fixed design size; the editor scales it.
 class MainView : public juce::Component, private juce::Timer, public juce::FileDragAndDropTarget
 {
@@ -191,6 +221,9 @@ private:
     std::unique_ptr<CameraView> cameraView;
     std::unique_ptr<SlimeView> slime;
     std::unique_ptr<GrainView> grainView;
+    std::unique_ptr<FullCameraView> fullCam;
+    juce::TextButton fullButton { "FULL SCREEN CAMERA" };
+    void openFullCamera (bool open);
     juce::Rectangle<int> arpLedArea, slimeRect, playRect;
     std::array<juce::Rectangle<int>, 4> moduleLedAreas;
 

@@ -60,6 +60,7 @@ public:
         status = "CAMERA OFF";
         const juce::SpinLock::ScopedLockType sl (previewLock);
         preview = {};
+        colour = {};
     }
 
     bool isOpen() const
@@ -76,6 +77,13 @@ public:
     std::atomic<int> triggerCount { 0 };
     std::atomic<float> sensitivity { 0.5f };
     juce::String status { "CAMERA OFF" };
+
+    // Larger colour frame for the full-screen view (not mirrored).
+    juce::Image getColourFrame()
+    {
+        const juce::SpinLock::ScopedLockType sl (previewLock);
+        return colour.isValid() ? colour.createCopy() : juce::Image();
+    }
 
     juce::Image getPreview()
     {
@@ -137,8 +145,10 @@ public:
                     dst.setPixelColour (x, y, mask[i] ? juce::Colour (255, 180, 58) : juce::Colour (v, (juce::uint8) juce::jmin (255, v + 18), v));
                 }
         }
+        auto big = frame.rescaled (juce::jmin (480, frame.getWidth()), juce::jmin (360, frame.getHeight()), juce::Graphics::lowResamplingQuality);
         const juce::SpinLock::ScopedLockType sl (previewLock);
         preview = img;
+        colour = big;
     }
 
 private:
@@ -149,5 +159,5 @@ private:
     float prev[W * H] {};
     bool hasPrev = false, armed = true;
     juce::SpinLock previewLock;
-    juce::Image preview;
+    juce::Image preview, colour;
 };

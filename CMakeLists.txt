@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Driftwerk VERSION 0.1.0)
+project(Timewind VERSION 0.2.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -18,9 +18,9 @@ else()
     FetchContent_MakeAvailable(JUCE)
 endif()
 
-juce_add_plugin(Driftwerk
-    COMPANY_NAME "Driftwerk"
-    BUNDLE_ID "com.driftwerk.driftwerk"
+juce_add_plugin(Timewind
+    COMPANY_NAME "Physare"
+    BUNDLE_ID "com.physare.timewind"
     IS_SYNTH TRUE
     NEEDS_MIDI_INPUT TRUE
     NEEDS_MIDI_OUTPUT FALSE
@@ -31,13 +31,13 @@ juce_add_plugin(Driftwerk
     PLUGIN_CODE Dw94
     VST3_CATEGORIES Instrument Synth
     FORMATS VST3 Standalone
-    PRODUCT_NAME "Driftwerk")
+    PRODUCT_NAME "Timewind")
 
-target_sources(Driftwerk PRIVATE
+target_sources(Timewind PRIVATE
     Source/PluginProcessor.cpp
     Source/PluginEditor.cpp)
 
-target_compile_definitions(Driftwerk PUBLIC
+target_compile_definitions(Timewind PUBLIC
     JUCE_WEB_BROWSER=0
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
@@ -45,7 +45,7 @@ target_compile_definitions(Driftwerk PUBLIC
     JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_USE_CAMERA=$<IF:$<PLATFORM_ID:Linux>,0,1>)
 
-target_link_libraries(Driftwerk
+target_link_libraries(Timewind
     PRIVATE
         juce::juce_audio_utils
         juce::juce_video

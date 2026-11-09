@@ -442,6 +442,186 @@ void GrainView::paint (juce::Graphics& g)
 void GrainView::mouseDown (const juce::MouseEvent&) { if (onClickLoad) onClickLoad(); }
 
 //==============================================================================
+FullCameraView::FullCameraView (DriftwerkProcessor& p, SlimeView& s) : proc (p), slime (s)
+{
+    setWantsKeyboardFocus (true);
+    struct K { const char* id; const char* label; bool toggle; };
+    const K ks[] { { "cam.on", "CAMERA", true }, { "play.on", "HAND PLAY", true }, { "play.depth", "DEPTH", false },
+                   { "cam.sens", "SENSITIVITY", false }, { "cam.slew", "SMOOTH", false }, { "hall.mix", "SPACE", false },
+                   { "tape.wow", "WARP", false }, { "out.vol", "VOLUME", false } };
+    for (auto& k : ks)
+    {
+        if (k.toggle)
+        {
+            auto t = std::make_unique<juce::ToggleButton>();
+            addAndMakeVisible (*t);
+            toggleAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, k.id, *t));
+            toggles.push_back (std::move (t));
+        }
+        else
+        {
+            auto sl = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+            sl->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
+            sl->setPopupDisplayEnabled (true, true, this, 900);
+            addAndMakeVisible (*sl);
+            knobAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, k.id, *sl));
+            knobs.push_back (std::move (sl));
+        }
+        labs.push_back ({ {}, k.label });
+    }
+    closeButton.onClick = [this] { if (onClose) onClose(); };
+    sceneButton.onClick = [this] { proc.rollScene(); };
+    addAndMakeVisible (closeButton);
+    addAndMakeVisible (sceneButton);
+}
+
+void FullCameraView::resized()
+{
+    const int panelX = getWidth() - 300;
+    stage = juce::Rectangle<float> (24.0f, 70.0f, (float) panelX - 48.0f, (float) getHeight() - 110.0f);
+    closeButton.setBounds (getWidth() - 200, 18, 180, 30);
+    // Two toggles, then knobs in a 2-column grid, then the scene button.
+    int y = 90;
+    for (size_t i = 0; i < toggles.size(); ++i)
+    {
+        toggles[i]->setBounds (panelX + 30 + (int) i * 130, y, 60, 40);
+        labs[i].r = { panelX + 10 + (int) i * 130, y + 42, 100, 16 };
+    }
+    y += 100;
+    for (size_t i = 0; i < knobs.size(); ++i)
+    {
+        const int col = (int) i % 2, row = (int) i / 2;
+        knobs[i]->setBounds (panelX + 34 + col * 130, y + row * 110, 64, 64);
+        labs[toggles.size() + i].r = { panelX + 16 + col * 130, y + row * 110 + 68, 100, 16 };
+    }
+    y += ((int) knobs.size() + 1) / 2 * 110 + 10;
+    sceneButton.setBounds (panelX + 20, y, 250, 40);
+}
+
+void FullCameraView::pushTrail()
+{
+    trailX[trailPos] = proc.monitor[O_CAM_X].load();
+    trailY[trailPos] = proc.monitor[O_CAM_Y].load();
+    trailPos = (trailPos + 1) % 24;
+}
+
+void FullCameraView::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black);
+    g.setColour (fg);
+    g.setFont (dwui::font (26.0f));
+    g.drawText ("Timewind", 24, 14, 200, 40, juce::Justification::centredLeft);
+    g.setColour (fg3);
+    g.setFont (dwui::font (13.0f));
+    g.drawText ("Camera stage. Move to play. Esc to go back.", 170, 14, 400, 40, juce::Justification::centredLeft);
+
+    // Fit a 4:3 picture into the stage.
+    auto pic = stage;
+    const float aspect = 4.0f / 3.0f;
+    if (pic.getWidth() / pic.getHeight() > aspect) pic = pic.withSizeKeepingCentre (pic.getHeight() * aspect, pic.getHeight());
+    else pic = pic.withSizeKeepingCentre (pic.getWidth(), pic.getWidth() / aspect);
+
+    const float level = juce::jlimit (0.0f, 1.0f, proc.outputLevel.load() * 1.6f);
+    auto frame = proc.camera.getColourFrame();
+    if (frame.isValid())
+    {
+        // Mirror, so it behaves like a mirror.
+        g.saveState();
+        g.addTransform (juce::AffineTransform::scale (-1.0f, 1.0f, pic.getCentreX(), pic.getCentreY()));
+        g.setOpacity (0.72f);
+        g.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);
+        g.drawImage (frame, pic);
+        g.restoreState();
+        // What's moving right now (fingers included), glowing in acid.
+        auto mask = proc.camera.getPreview();
+        if (mask.isValid())
+        {
+            g.setOpacity (0.35f);
+            g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+            g.drawImage (mask, pic);
+            g.setOpacity (1.0f);
+        }
+    }
+    else
+    {
+        g.setColour (fg3);
+        g.setFont (dwui::font (18.0f));
+        g.drawText (proc.camera.isOpen() ? "waiting for the camera..." : "turn on CAMERA (right) to start",
+                    pic.toNearestInt(), juce::Justification::centred);
+    }
+
+    // Slime mold grows over the picture.
+    g.setOpacity (frame.isValid() ? 0.55f : 0.9f);
+    g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
+    g.drawImage (slime.sim.render (level), pic);
+    g.setOpacity (1.0f);
+    g.setColour (rule);
+    g.drawRect (pic, 1.0f);
+
+    // Hand trail and crosshair
+    if (proc.camera.isOpen())
+    {
+        juce::Path trail;
+        for (int k = 0; k < 24; ++k)
+        {
+            const int i = (trailPos + k) % 24;
+            const float x = pic.getCentreX() + trailX[i] * pic.getWidth() * 0.5f;
+            const float y = pic.getCentreY() - trailY[i] * pic.getHeight() * 0.5f;
+            if (k == 0) trail.startNewSubPath (x, y); else trail.lineTo (x, y);
+        }
+        g.setColour (acid.withAlpha (0.5f));
+        g.strokePath (trail, juce::PathStrokeType (2.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        const float hx = pic.getCentreX() + proc.monitor[O_CAM_X].load() * pic.getWidth() * 0.5f;
+        const float hy = pic.getCentreY() - proc.monitor[O_CAM_Y].load() * pic.getHeight() * 0.5f;
+        const float m = proc.monitor[O_CAM_MOTION].load();
+        const float rad = 16.0f + m * 30.0f;
+        g.setColour (acid.withAlpha (0.25f));
+        g.fillEllipse (hx - rad, hy - rad, rad * 2, rad * 2);
+        g.setColour (acid);
+        g.drawEllipse (hx - 14, hy - 14, 28, 28, 2.0f);
+    }
+
+    // Readouts
+    g.setColour (fg2);
+    g.setFont (dwui::mono (14.0f));
+    g.drawText (juce::String::formatted ("hand x %+.2f    hand y %+.2f    motion %.2f",
+                 proc.monitor[O_CAM_X].load(), proc.monitor[O_CAM_Y].load(), proc.monitor[O_CAM_MOTION].load()),
+                (int) pic.getX(), (int) pic.getBottom() + 8, (int) pic.getWidth(), 20, juce::Justification::left);
+
+    // Side panel
+    const int panelX = getWidth() - 300;
+    g.setColour (rule);
+    g.drawVerticalLine (panelX, 60.0f, (float) getHeight() - 20.0f);
+    g.setColour (fg);
+    g.setFont (dwui::font (18.0f));
+    g.drawText ("Hand Play", panelX + 20, 56, 200, 24, juce::Justification::left);
+    for (auto& l : labs)
+    {
+        g.setColour (fg2);
+        g.setFont (dwui::font (12.0f).withExtraKerningFactor (0.06f));
+        g.drawText (l.t, l.r, juce::Justification::centred);
+    }
+    // World bar
+    const auto bar = juce::Rectangle<float> ((float) panelX + 40, (float) sceneButton.getBottom() + 50, 210, 1);
+    g.setColour (rule);
+    g.fillRect (bar);
+    const char* names[] { "airport", "tape", "cosmic" };
+    for (int k = 0; k < 3; ++k)
+    {
+        const float x = bar.getX() + bar.getWidth() * (float) k / 2.0f;
+        g.setColour (fg3);
+        g.setFont (dwui::font (12.0f));
+        g.drawText (names[k], (int) x - 35, (int) bar.getY() + 8, 70, 16, juce::Justification::centred);
+    }
+    const float px = bar.getX() + bar.getWidth() * (proc.monitor[O_CAM_X].load() * 0.5f + 0.5f);
+    drawGlowDot (g, { px, bar.getY() }, 1.0f, 5.0f);
+    g.setColour (fg3);
+    g.setFont (dwui::font (12.0f));
+    g.drawFittedText ("Left / right: world\nUp / down: bright + space\nMove more: denser, wilder\nQuick wave: new scene",
+                      juce::Rectangle<int> (panelX + 20, (int) bar.getY() + 40, 260, 80), juce::Justification::topLeft, 5);
+}
+
+//==============================================================================
 MainView::MainView (DriftwerkProcessor& p) : proc (p)
 {
     setLookAndFeel (&lnf);
@@ -457,9 +637,9 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
         // rack row 1
         { M_CLOCK, "Clock", "time + tune", 1, 0, 110, 1,
           { { "clk.div", "RATE", 1 }, { "clk.bpm", "BPM", 0 }, { "clk.run", "RUN", 2 }, { "out.tune", "TUNE", 0 } } },
-        { M_ARP, "Random Arp", "shift register", 1, 110, 250, 3,
-          { { "arp.scale", "SCALE", 1 }, { "arp.root", "ROOT", 0 }, { "arp.range", "RANGE", 0 },
-            { "arp.len", "LENGTH", 0 }, { "arp.density", "DENSITY", 0 }, { "arp.mutate", "MUTATE", 0 },
+        { M_ARP, "Random Arp", "shift register", 1, 110, 250, 4,
+          { { "arp.on", "ON", 2 }, { "arp.follow", "HARMONY", 1 }, { "arp.scale", "SCALE", 1 }, { "arp.root", "ROOT", 0 },
+            { "arp.range", "RANGE", 0 }, { "arp.len", "LENGTH", 0 }, { "arp.density", "DENSITY", 0 }, { "arp.mutate", "MUTATE", 0 },
             { "arp.walk", "WALK", 0 }, { "arp.gate", "GATE", 0 } } },
         { M_VCO1, "VCO 1", "oscillator", 1, 360, 140, 2,
           { { "vco1.oct", "OCTAVE", 0 }, { "vco1.fine", "FINE", 0 }, { "vco1.pw", "WIDTH", 0 }, { "vco1.pwm", "PWM", 0 }, { "vco1.fm", "FM", 0 } } },
@@ -539,6 +719,12 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
 
     cables = std::make_unique<CableLayer> (*this);
     addAndMakeVisible (*cables);
+
+    fullButton.onClick = [this] { openFullCamera (true); };
+    addAndMakeVisible (fullButton);
+    fullCam = std::make_unique<FullCameraView> (proc, *slime);
+    fullCam->onClose = [this] { openFullCamera (false); };
+    addChildComponent (*fullCam);
 
     setSize (designW, designH);
     lastPatch = proc.getPatchString();
@@ -658,14 +844,14 @@ void MainView::paint (juce::Graphics& g)
     // Header, in the site's voice
     g.setColour (fg);
     g.setFont (dwui::font (28.0f).withExtraKerningFactor (0.02f));
-    g.drawText ("Driftwerk", 16, 8, 200, 40, juce::Justification::centredLeft);
+    g.drawText ("Timewind", 16, 8, 200, 40, juce::Justification::centredLeft);
     g.setColour (fg3);
     g.setFont (dwui::font (13.0f));
     g.drawText ("Grow sound with your hands.", 150, 8, 260, 40, juce::Justification::centredLeft);
     g.setColour (fg3);
     g.setFont (dwui::font (11.0f));
-    g.drawText ("drag jack to jack to patch  /  right-click a jack to unplug  /  right-click a knob to play it by hand",
-                400, 8, 480, 40, juce::Justification::centredLeft);
+    g.drawFittedText ("drag jack to jack to patch  /  right-click a jack to unplug\nright-click a knob to play it by hand",
+                      350, 8, 360, 40, juce::Justification::centredLeft, 2);
     g.setColour (rule);
     g.drawHorizontalLine (52, 0.0f, (float) getWidth());
 
@@ -746,9 +932,17 @@ void MainView::paint (juce::Graphics& g)
         }
 }
 
+void MainView::openFullCamera (bool open)
+{
+    fullCam->setVisible (open);
+    if (open) { fullCam->toFront (true); fullCam->grabKeyboardFocus(); }
+}
+
 void MainView::resized()
 {
     cables->setBounds (getLocalBounds());
+    fullCam->setBounds (getLocalBounds());
+    fullButton.setBounds (getWidth() - 780, 14, 170, 26);
     presetBox.setBounds (getWidth() - 600, 14, 200, 26);
     randomButton.setBounds (getWidth() - 390, 14, 130, 26);
     clearButton.setBounds (getWidth() - 252, 14, 100, 26);
@@ -907,6 +1101,12 @@ void MainView::timerCallback()
 
     slime->advance();
     slime->advance();
+    if (fullCam->isVisible())
+    {
+        fullCam->pushTrail();
+        fullCam->repaint();
+        return;
+    }
     slime->repaint();
     scope->repaint();
     grainView->repaint();
@@ -921,14 +1121,28 @@ DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p) : AudioProcessorEditor 
 {
     addAndMakeVisible (view);
     setResizable (true, true);
-    setResizeLimits (MainView::designW / 2, MainView::designH / 2, MainView::designW * 2, MainView::designH * 2);
+    setResizeLimits (MainView::designW / 3, MainView::designH / 3, MainView::designW * 2, MainView::designH * 2);
     if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) MainView::designW / (double) MainView::designH);
-    setSize ((int) (MainView::designW * 0.8), (int) (MainView::designH * 0.8));
+
+    // Open at a size that fits the screen (minus taskbar and the host's window title).
+    double fit = 0.8;
+    if (auto* d = juce::Desktop::getInstance().getDisplays().getPrimaryDisplay())
+    {
+        const auto area = d->userArea;
+        fit = juce::jmin ((area.getWidth() - 40) / (double) MainView::designW,
+                          (area.getHeight() - 110) / (double) MainView::designH, 1.0);
+    }
+    fit = juce::jmax (fit, 0.4);
+    setSize ((int) (MainView::designW * fit), (int) (MainView::designH * fit));
 }
 
 void DriftwerkEditor::resized()
 {
-    const float scale = (float) getWidth() / (float) MainView::designW;
-    view.setTransform (juce::AffineTransform::scale (scale));
+    // Fit the whole rack inside the window whatever shape the host gives us, centred.
+    const float scale = juce::jmin ((float) getWidth() / (float) MainView::designW,
+                                    (float) getHeight() / (float) MainView::designH);
+    const float ox = ((float) getWidth()  - MainView::designW * scale) * 0.5f;
+    const float oy = ((float) getHeight() - MainView::designH * scale) * 0.5f;
+    view.setTransform (juce::AffineTransform::scale (scale).translated (ox, oy));
     view.setBounds (0, 0, MainView::designW, MainView::designH);
 }

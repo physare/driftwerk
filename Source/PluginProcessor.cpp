@@ -12,7 +12,7 @@ const double clockDivBeats[] { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
 const juce::StringArray echoDivNames { "1/16", "1/8", "1/8D", "1/4", "1/4D", "1/2", "FREE" };
 const double echoDivBeats[] { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 0.0 };
 
-const juce::StringArray scaleNames { "MINOR", "DORIAN", "PHRYG", "PENTA", "HARM", "WHOLE" };
+const juce::StringArray scaleNames { "MINOR", "DORIAN", "PHRYG", "PENTA", "HARM", "WHOLE", "MAJOR", "LYDIAN" };
 const std::vector<std::vector<int>> scales {
     { 0, 2, 3, 5, 7, 8, 10 },
     { 0, 2, 3, 5, 7, 9, 10 },
@@ -20,7 +20,15 @@ const std::vector<std::vector<int>> scales {
     { 0, 3, 5, 7, 10 },
     { 0, 2, 3, 5, 7, 8, 11 },
     { 0, 2, 4, 6, 8, 10 },
+    { 0, 2, 4, 5, 7, 9, 11 },
+    { 0, 2, 4, 6, 7, 9, 11 },
 };
+
+// Dream pad voicings (semitones above the shared root). The arp's PADS mode plays only these notes.
+const int dreamChords[6][6] {
+    { 0, 4, 7, 11, 14, 19 }, { 0, 3, 7, 10, 14, 17 }, { 0, 2, 7, 12, 14, 19 },
+    { 0, 4, 6, 11, 14, 18 }, { 0, 4, 7, 14, 16, 19 }, { 0, 5, 10, 15, 19, 22 } };
+const juce::StringArray arpFollowNames { "SCALE", "PADS", "ROOTS" };
 
 const juce::StringArray chordNames { "UNISON", "FIFTH", "OCTAVE", "MINOR", "SUS", "CLUSTER" };
 const int chords[6][6] {
@@ -129,7 +137,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     ps.push_back (std::make_unique<AudioParameterInt> (ParameterID { "arp.root", 1 }, "Root Note", 24, 60, 36,
         AudioParameterIntAttributes().withStringFromValueFunction ([] (int v, int)
         { return MidiMessage::getMidiNoteName (v, true, true, 3); })));
-    in ("arp.range", "Arp NRange", 1, 4, 2);
+    in ("arp.range", "Arp Range", 1, 4, 2);
+    bo ("arp.on", "Arp On", true);
+    ch ("arp.follow", "Arp Harmony", arpFollowNames, 1);
     in ("arp.len", "Arp Length", 1, 16, 16);
     fl ("arp.density", "Arp Density", NRange (0.0f, 1.0f), 0.82f);
     fl ("arp.mutate", "Arp Mutate", NRange (0.0f, 1.0f), 0.12f);
@@ -210,7 +220,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("hall.damp", "Hall Damping", NRange (0.0f, 1.0f), 0.45f);
     fl ("hall.mix", "Hall Mix", NRange (0.0f, 1.0f), 0.42f);
     // Dream loops
-    ch ("dream.chord", "Dream Chord", StringArray { "MAJ 7", "MIN 9", "SUS 2", "LYDIAN", "ADD 9", "QUARTAL" }, 0);
+    ch ("dream.chord", "Dream Chord", StringArray { "MAJ 7", "MIN 9", "SUS 2", "LYDIAN", "ADD 9", "QUARTAL" }, 1);
     fl ("dream.rate", "Dream Speed", skewed (0.2f, 4.0f, 1.0f), 1.0f);
     fl ("dream.tone", "Dream Tone", NRange (0.0f, 1.0f), 0.3f);
     fl ("dream.warp", "Dream Warp", NRange (0.0f, 1.0f), 0.45f);
@@ -351,9 +361,21 @@ void DriftwerkProcessor::rollScene()
     };
     const int roots[] { 33, 35, 36, 38, 40, 41, 43, 45 };
     set ("arp.root", (float) roots[r.nextInt (8)]);
-    set ("arp.scale", (float) r.nextInt (5));
-    set ("dream.chord", (float) r.nextInt (6));
-    set ("drn.chord", (float) (1 + r.nextInt (5)));
+    // Pick one harmonic world so arp, pads and drone agree.
+    if (r.nextBool())
+    {   // minor: MINOR / DORIAN / PENTA with MIN 9, SUS 2 or QUARTAL pads, FIFTH / OCTAVE / MINOR / SUS drone
+        const int sc[] { 0, 1, 3 }, dc[] { 1, 2, 5 }, dr[] { 1, 2, 3, 4 };
+        set ("arp.scale", (float) sc[r.nextInt (3)]);
+        set ("dream.chord", (float) dc[r.nextInt (3)]);
+        set ("drn.chord", (float) dr[r.nextInt (4)]);
+    }
+    else
+    {   // major: MAJOR / LYDIAN with MAJ 7, LYDIAN, SUS 2 or ADD 9 pads, FIFTH / OCTAVE / SUS drone
+        const int sc[] { 6, 7 }, dc[] { 0, 3, 2, 4 }, dr[] { 1, 2, 4 };
+        set ("arp.scale", (float) sc[r.nextInt (2)]);
+        set ("dream.chord", (float) dc[r.nextInt (4)]);
+        set ("drn.chord", (float) dr[r.nextInt (3)]);
+    }
     set ("lfo1.rate", 0.01f + r.nextFloat() * r.nextFloat() * 0.3f);
     set ("lfo2.rate", 0.02f + r.nextFloat() * r.nextFloat() * 1.5f);
     set ("lfo1.shape", (float) r.nextInt (4));
@@ -500,12 +522,30 @@ void DriftwerkProcessor::randomisePatch()
 }
 
 //==============================================================================
+// The notes the arp may play inside one octave: the chosen scale, the pad chord's
+// pitch classes (always consonant with DREAM), or just root and fifth.
+int DriftwerkProcessor::arpPitchSet (int* out) const
+{
+    if (p.arpFollow == 1)
+    {
+        bool has[12] {};
+        for (int k = 0; k < 6; ++k) has[dreamChords[juce::jlimit (0, 5, p.dreamChord)][k] % 12] = true;
+        int n = 0;
+        for (int k = 0; k < 12; ++k) if (has[k]) out[n++] = k;
+        return n;
+    }
+    if (p.arpFollow == 2) { out[0] = 0; out[1] = 7; return 2; }
+    const auto& sc = scales[(size_t) juce::jlimit (0, (int) scales.size() - 1, p.scale)];
+    for (size_t k = 0; k < sc.size(); ++k) out[k] = sc[k];
+    return (int) sc.size();
+}
+
 int DriftwerkProcessor::scaleSemitone (int degree) const
 {
-    const auto& sc = scales[(size_t) juce::jlimit (0, (int) scales.size() - 1, p.scale)];
-    const int n = (int) sc.size();
+    int set[12];
+    const int n = arpPitchSet (set);
     if (degree < 0) degree = 0;
-    return sc[(size_t) (degree % n)] + 12 * (degree / n);
+    return set[degree % n] + 12 * (degree / n);
 }
 
 void DriftwerkProcessor::arpClock()
@@ -514,7 +554,8 @@ void DriftwerkProcessor::arpClock()
     const int prevStep = arp.step;
     arp.step = (arp.step + 1) % len;
 
-    const int n = (int) scales[(size_t) p.scale].size();
+    int set[12];
+    const int n = arpPitchSet (set);
     const int maxDeg = n * p.range;
 
     auto u = [this] { return arpRng.next() * 0.5f + 0.5f; };
@@ -537,7 +578,7 @@ void DriftwerkProcessor::arpClock()
 
     const int deg = juce::jmin (arp.degree[arp.step], maxDeg);
     // Step 0 always plays, giving the loop an anchor; others follow density.
-    const bool play = arp.step == 0 || arp.rnd[arp.step] < p.density;
+    const bool play = p.arpOn && (arp.step == 0 || arp.rnd[arp.step] < p.density);
 
     if (play)
     {
@@ -618,6 +659,7 @@ void DriftwerkProcessor::updateBlockParams()
     p.clkDiv = i ("clk.div"); p.clkBpm = f ("clk.bpm"); p.clkRun = f ("clk.run") > 0.5f;
     p.scale = i ("arp.scale"); p.root = i ("arp.root"); p.range = i ("arp.range"); p.length = i ("arp.len");
     p.density = f ("arp.density"); p.mutate = f ("arp.mutate"); p.walk = f ("arp.walk"); p.gateLen = f ("arp.gate");
+    p.arpOn = f ("arp.on") > 0.5f; p.arpFollow = i ("arp.follow");
     p.vco1Oct = i ("vco1.oct"); p.vco1Fine = f ("vco1.fine"); p.vco1Pw = f ("vco1.pw"); p.vco1Pwm = f ("vco1.pwm"); p.vco1Fm = f ("vco1.fm");
     p.vco2Oct = i ("vco2.oct"); p.vco2Fine = f ("vco2.fine"); p.vco2Pw = f ("vco2.pw"); p.vco2Pwm = f ("vco2.pwm"); p.vco2Fm = f ("vco2.fm");
     p.droneChord = i ("drn.chord"); p.droneOct = i ("drn.oct"); p.droneDetune = f ("drn.detune");
@@ -805,9 +847,6 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     // ---- DREAM + GRAIN (stereo, normalled straight to the master bus unless their OUT is patched)
     float dl = 0.0f, dr = 0.0f, gl = 0.0f, gr = 0.0f;
     {
-        static const int dreamChords[6][6] {
-            { 0, 4, 7, 11, 14, 19 }, { 0, 3, 7, 10, 14, 17 }, { 0, 2, 7, 12, 14, 19 },
-            { 0, 4, 6, 11, 14, 18 }, { 0, 4, 7, 14, 16, 19 }, { 0, 5, 10, 15, 19, 22 } };
         const float dm = dream.process (dreamChords[juce::jlimit (0, 5, p.dreamChord)], 6, baseNote,
                                         p.dreamRate, p.dreamTone, p.dreamWarp, dl, dr);
         outs[O_DREAM] = dm * p.dreamLevel * 1.6f;

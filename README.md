@@ -1,4 +1,4 @@
-# Driftwerk
+# Timewind
 
 An original, self-running modular synthesizer plugin (VST3) for slow, cosmic, Berlin-school
 music: long drones, randomly evolving arpeggios, slow filter sweeps, tape echo and a huge hall.
@@ -62,13 +62,13 @@ Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine, Hand Garden (camera 
 
 ## Building
 
-Every push builds the Windows VST3 on GitHub Actions (see the Actions tab, artifact `Driftwerk-Windows`).
+Every push builds the Windows VST3 on GitHub Actions (see the Actions tab, artifact `Timewind-Windows`).
 
 Locally (needs CMake 3.22+ and Visual Studio 2022 or another C++17 compiler):
 
 ```
 cmake -B build
-cmake --build build --config Release --target Driftwerk_VST3
+cmake --build build --config Release --target Timewind_VST3
 ```
 
 ## Automatic updates (Windows)
@@ -78,15 +78,15 @@ To have your PC install new builds by itself, open PowerShell **as Administrator
 
 ```
 gh auth login   # only if the GitHub CLI isn't signed in yet
-powershell -ExecutionPolicy Bypass -File tools\windows\install-driftwerk.ps1
+powershell -ExecutionPolicy Bypass -File tools\windows\install-timewind.ps1
 ```
 
-This installs Driftwerk, links it into `C:\Program Files\Common Files\VST3`, and adds a "Driftwerk Updater"
+This installs Timewind, links it into `C:\Program Files\Common Files\VST3`, and adds a "Timewind Updater"
 scheduled task that checks every 30 minutes and at logon. It waits while Ableton is open, since Windows locks
-plugins that are in use, so new builds land the next time Ableton is closed. Log: `%LOCALAPPDATA%\Driftwerk\update.log`.
+plugins that are in use, so new builds land the next time Ableton is closed. Log: `%LOCALAPPDATA%\Timewind\update.log`.
 
 ## Installing in Ableton manually (Windows)
 
-1. Copy `Driftwerk.vst3` to `C:\Program Files\Common Files\VST3\`.
+1. Copy `Timewind.vst3` to `C:\Program Files\Common Files\VST3\`.
 2. In Ableton: Options > Preferences > Plug-Ins, turn on "Use VST3 Plug-In System Folders", then Rescan.
-3. Drag Driftwerk from Plug-Ins > Driftwerk onto a MIDI track and press play.
+3. Drag Timewind from Plug-Ins > Timewind onto a MIDI track and press play.

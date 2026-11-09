@@ -1,4 +1,4 @@
-// Driftwerk DSP building blocks.
+// Timewind DSP building blocks.
 // Original code: PolyBLEP oscillators, ZDF ladder filter, envelopes, LFOs,
 // string ensemble, tape echo and an FDN hall reverb.
 #pragma once

@@ -22,7 +22,7 @@ public:
     juce::AudioProcessorEditor* createEditor() override;
     bool hasEditor() const override { return true; }
 
-    const juce::String getName() const override { return "Driftwerk"; }
+    const juce::String getName() const override { return "Timewind"; }
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
@@ -119,6 +119,7 @@ private:
     dw::Random arpRng { 0x5EED1234u };
     void arpClock();
     int scaleSemitone (int degree) const;
+    int arpPitchSet (int* out) const;
 
     // VCOs
     dw::BlepOsc vco1Saw, vco1Pulse, vco1Sub, vco2Saw, vco2Pulse, vco2Sub;
@@ -171,6 +172,7 @@ private:
         int clkDiv = 3; float clkBpm = 100; bool clkRun = true;
         int scale = 0, root = 36, range = 2, length = 16;
         float density = 0.85f, mutate = 0.15f, walk = 0.6f, gateLen = 0.5f;
+        bool arpOn = true; int arpFollow = 1;
         int vco1Oct = 0, vco2Oct = 0; float vco1Fine = 0, vco2Fine = 0, vco1Pw = 0.5f, vco2Pw = 0.5f;
         float vco1Pwm = 0.5f, vco2Pwm = 0.5f, vco1Fm = 0.0f, vco2Fm = 0.0f;
         int droneChord = 1, droneOct = 0; float droneDetune = 0.4f, droneDriftAmt = 0.4f, droneLevel = 0.6f;
