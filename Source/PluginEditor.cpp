@@ -463,6 +463,16 @@ void GrainView::paint (juce::Graphics& g)
     g.setFont (dwui::font (11.0f));
     g.drawText (proc.getSampleName(), r.reduced (8, 4), juce::Justification::topLeft);
     g.drawText ("drop a sound file here", r.reduced (8, 4), juce::Justification::bottomRight);
+    // How IN KEY is treating this sound.
+    juce::String keyInfo = "free pitch";
+    if (proc.apvts.getRawParameterValue ("grain.key")->load() > 0.5f)
+    {
+        const auto* sd = proc.getSampleForDisplay();
+        keyInfo = sd != nullptr && sd->rootMidi > 0.0f
+                    ? "in key: its " + juce::MidiMessage::getMidiNoteName (juce::roundToInt (sd->rootMidi), true, false, 3) + " follows the chords"
+                    : "in key: no clear pitch, so PITCH moves in octaves";
+    }
+    g.drawText (keyInfo, r.reduced (8, 4), juce::Justification::bottomLeft);
     g.setColour (dragHover ? acid : rule);
     g.drawRect (r, dragHover ? 2.0f : 1.0f);
 }
@@ -696,7 +706,7 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
           { { "vco1.oct", "OCTAVE", 0 }, { "vco1.fine", "FINE", 0 }, { "vco1.pw", "WIDTH", 0 }, { "vco1.pwm", "PWM", 0 }, { "vco1.fm", "FM", 0 } } },
         { M_VCO2, "VCO 2", "oscillator", 1, 500, 140, 2,
           { { "vco2.oct", "OCTAVE", 0 }, { "vco2.fine", "FINE", 0 }, { "vco2.pw", "WIDTH", 0 }, { "vco2.pwm", "PWM", 0 }, { "vco2.fm", "FM", 0 } } },
-        { M_DRONE, "Drone", "six drifting saws", 1, 640, 160, 2,
+        { M_DRONE, "Drone", "six drifting voices", 1, 640, 160, 2,
           { { "drn.chord", "CHORD", 1 }, { "drn.oct", "OCTAVE", 0 }, { "drn.detune", "DETUNE", 0 }, { "drn.drift", "DRIFT", 0 }, { "drn.level", "LEVEL", 0 } } },
         { M_NOISE, "Noise", "sample + hold", 1, 800, 100, 1, { { "nz.slew", "SLEW", 0 } } },
         { M_LFO1, "LFO 1", "slow", 1, 900, 100, 1, { { "lfo1.rate", "RATE", 0 }, { "lfo1.shape", "SHAPE", 1 } } },
@@ -737,6 +747,17 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     loadButton.setBounds (452, t0 + 8, 98, 22);
     loadButton.onClick = [this] { chooseSample(); };
     addAndMakeVisible (loadButton);
+    // Built-in sounds (or your own file) and the IN KEY lock.
+    soundBox.addItemList (DriftwerkProcessor::grainSourceNames(), 1);
+    soundBox.setBounds (238, t0 + 8, 140, 22);
+    soundBox.setTooltip ("Sound for GRAIN: one of the built-in sounds, or MY FILE (the last file you loaded)");
+    addAndMakeVisible (soundBox);
+    soundAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, "grain.src", soundBox);
+    keyButton.setBounds (384, t0 + 8, 62, 22);
+    keyButton.setClickingTogglesState (true);
+    keyButton.setTooltip ("IN KEY: moves the sound into Timewind's key and snaps PITCH to octaves and fifths");
+    addAndMakeVisible (keyButton);
+    keyAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "grain.key", keyButton);
 
     slimeRect = { 568, t0, 700, rowHeight (0) };
     slime = std::make_unique<SlimeView> (proc);
@@ -1055,7 +1076,8 @@ void MainView::chooseSample()
         [this] (const juce::FileChooser& fc)
         {
             const auto f = fc.getResult();
-            if (f.existsAsFile()) { proc.loadSample (f); grainView->repaint(); }
+            if (f.existsAsFile() && proc.loadSample (f)) useMyFile();
+            grainView->repaint();
         });
 }
 
@@ -1063,8 +1085,19 @@ void MainView::filesDropped (const juce::StringArray& files, int, int)
 {
     grainView->dragHover = false;
     for (auto& path : files)
-        if (proc.loadSample (juce::File (path))) break;
+        if (proc.loadSample (juce::File (path))) { useMyFile(); break; }
     grainView->repaint();
+}
+
+void MainView::useMyFile()
+{
+    if (auto* src = proc.apvts.getParameter ("grain.src"))
+    {
+        src->beginChangeGesture();
+        src->setValueNotifyingHost (src->convertTo0to1 ((float) DriftwerkProcessor::myFileSource));
+        src->endChangeGesture();
+    }
+    proc.syncGrainSource();
 }
 
 void MainView::showModMenu (ModSlider& s)
@@ -1225,11 +1258,11 @@ void MainView::timerCallback()
 //==============================================================================
 PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view (v)
 {
-    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "HARMONY", "ORGANISM" };
-    for (int t = 0; t < 5; ++t)
+    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "CHORDS", "HARMONY", "ORGANISM" };
+    for (int t = 0; t < NumTabs; ++t)
     {
         tabButtons[t].setButtonText (tabNames[t]);
-        tabButtons[t].setBounds (700 - 5 * 88 + t * 88 - 8, 6, 84, 22);
+        tabButtons[t].setBounds (700 - NumTabs * 84 + t * 84 - 8, 6, 80, 22);
         tabButtons[t].onClick = [this, t] { setTab (t); };
         addAndMakeVisible (tabButtons[t]);
     }
@@ -1281,11 +1314,25 @@ PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view
     }
     // ---- DRONE tab
     {
-        combo ("drn.chord", "CHORD", Drone, 30, 66, 92);
+        combo ("drn.type", "TYPE", Drone, 30, 48, 92);
+        combo ("drn.chord", "CHORD", Drone, 30, 104, 92);
         const std::pair<const char*, const char*> k[] { { "drn.oct", "OCTAVE" }, { "drn.detune", "DETUNE" }, { "drn.drift", "DRIFT" },
-            { "drn.level", "LEVEL" }, { "drn.tone", "TONE" }, { "drn.wave", "SAW > SOFT" }, { "drn.breath", "BREATH" },
+            { "drn.level", "LEVEL" }, { "drn.tone", "TONE" }, { "drn.wave", "COLOUR" }, { "drn.breath", "BREATH" },
             { "drn.air", "AIR" }, { "drn.sub", "SUB" } };
         for (int i = 0; i < 9; ++i) { const int c = i + 1; knob (k[i].first, k[i].second, Drone, 30 + (c % 5) * 132, 62 + (c / 5) * 104); }
+    }
+    // ---- CHORDS tab
+    {
+        chordsOnButton.setBounds (30, 48, 92, 24);
+        chordsOnButton.setClickingTogglesState (true);
+        chordsOnButton.getProperties().set ("accent", true);
+        addAndMakeVisible (chordsOnButton);
+        bAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "chd.on", chordsOnButton));
+        tabbed.push_back ({ &chordsOnButton, Chords });
+        combo ("chd.mode", "STYLE", Chords, 30, 104, 92);
+        const std::pair<const char*, const char*> k[] { { "chd.level", "LEVEL" }, { "chd.voices", "VOICES" }, { "chd.oct", "OCTAVE" },
+            { "chd.wave", "COLOUR" }, { "chd.tone", "TONE" }, { "chd.attack", "ATTACK" }, { "chd.release", "RELEASE" }, { "chd.width", "WIDTH" } };
+        for (int i = 0; i < 8; ++i) { const int c = i + 1; knob (k[i].first, k[i].second, Chords, 30 + (c % 5) * 132, 62 + (c / 5) * 104); }
     }
     // ---- HARMONY tab
     combo ("prog.mode", "PROGRESSION", Harmony, 20, 70, 120);
@@ -1332,7 +1379,7 @@ void PerformPanel::combo (const char* param, const char* label, int tabId, int x
 void PerformPanel::setTab (int t)
 {
     tab = t;
-    for (int i = 0; i < 5; ++i) tabButtons[i].setToggleState (i == t, juce::dontSendNotification);
+    for (int i = 0; i < NumTabs; ++i) tabButtons[i].setToggleState (i == t, juce::dontSendNotification);
     for (auto& [c, ct] : tabbed) c->setVisible (ct == t);
     repaint();
 }
@@ -1345,7 +1392,7 @@ void PerformPanel::refresh()
         slotButtons[i].getProperties().set ("accent", proc.slotUsed (i));
         slotButtons[i].setToggleState (i == lastSlot, juce::dontSendNotification);
     }
-    if (tab == Sequence || tab == Harmony) repaint();
+    if (tab == Sequence || tab == Harmony || tab == Chords) repaint();
 }
 
 int PerformPanel::colAt (int x) const
@@ -1402,10 +1449,11 @@ void PerformPanel::paint (juce::Graphics& g)
     g.setColour (rule);
     g.drawRect (getLocalBounds(), 1);
 
-    const char* titles[] { "Sequence", "Arp sound", "Drone", "Harmony" };
+    const char* titles[] { "Sequence", "Arp sound", "Drone", "Chords", "Harmony" };
     const char* subs[] { "HOLD keeps the pattern. Click a step on/off, drag to set its note, REC NOTES to play it in.",
                          "shapes the arp voice: VCO > VCF 1 > VCA 1 (in most presets)",
-                         "six drifting voices: shape, breath and air",
+                         "TYPE: saws, organ, strings, glass or choir. COLOUR shapes each type (brightness, drawbars, width, shimmer, vowel).",
+                         "a chord layer that always plays the HARMONY chord, voice-led and in tune with the arp, drone and pads",
                          "chords that move together: pads, drone and arp" };
     g.setColour (fg);
     g.setFont (dwui::font (15.0f));
@@ -1457,6 +1505,36 @@ void PerformPanel::paint (juce::Graphics& g)
         g.setFont (dwui::font (10.0f));
         g.drawText (held ? (proc.recordNotes.load() ? "recording: play your keyboard" : "held") : "free: the arp keeps changing it",
                     gr.getRight() - 220, 8, 220, 20, juce::Justification::right);
+    }
+    else if (tab == Chords)
+    {
+        // The notes the chord layer is playing now.
+        const int n = proc.chordNoteCount.load();
+        const auto area = juce::Rectangle<int> (30 + 4 * 132 - 10, 160, 140, 74);
+        g.setColour (fg3);
+        g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
+        g.drawText ("NOW PLAYING", area.withHeight (14), juce::Justification::centred);
+        g.setFont (dwui::mono (12.0f));
+        if (n == 0)
+        {
+            g.drawText ("off", area.withTrimmedTop (22).withHeight (18), juce::Justification::centred);
+        }
+        else
+        {
+            juce::StringArray names;
+            for (int i = 0; i < n; ++i) names.add (juce::MidiMessage::getMidiNoteName (proc.chordNotes[(size_t) i].load(), true, true, 3));
+            g.setColour (acid);
+            const int half = (n + 1) / 2;
+            juce::StringArray a, b;
+            for (int i = 0; i < n; ++i) (i < half ? a : b).add (names[i]);
+            g.drawText (a.joinIntoString (" "), area.withTrimmedTop (22).withHeight (18), juce::Justification::centred);
+            g.drawText (b.joinIntoString (" "), area.withTrimmedTop (42).withHeight (18), juce::Justification::centred);
+        }
+        g.setColour (fg3);
+        g.setFont (dwui::font (10.0f));
+        const char* how[] { "held, gliding between chords", "swells in every 2 bars", "on every beat", "with every arp note", "strummed every bar" };
+        g.drawFittedText (how[juce::jlimit (0, 4, (int) std::lround (proc.apvts.getRawParameterValue ("chd.mode")->load()))],
+                          area.withTrimmedTop (62).withHeight (26), juce::Justification::centred, 2);
     }
     else if (tab == Harmony)
     {

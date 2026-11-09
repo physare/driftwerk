@@ -226,12 +226,16 @@ struct DelayLine
     float read (float delaySamples) const
     {
         const int size = (int) buf.size();
+        if (! (delaySamples == delaySamples)) delaySamples = 1.0f;          // NaN guard
         delaySamples = clampf (delaySamples, 1.0f, (float) size - 3.0f);
-        float rp = (float) write - delaySamples;
-        while (rp < 0.0f) rp += (float) size;
-        const int i0 = (int) rp;
+        // Split into whole + fraction first: in float, (write - d + size) can round up to
+        // exactly size, which read one past the end of the buffer.
+        const int whole = (int) delaySamples;
+        const float frac0 = delaySamples - (float) whole;
+        int i0 = write - whole - (frac0 > 0.0f ? 1 : 0);
+        if (i0 < 0) i0 += size;
+        const float frac = frac0 > 0.0f ? 1.0f - frac0 : 0.0f;
         const int i1 = (i0 + 1) % size;
-        const float frac = rp - (float) i0;
         return buf[(size_t) i0] + (buf[(size_t) i1] - buf[(size_t) i0]) * frac;
     }
 };
@@ -581,12 +585,47 @@ struct DreamBank
 };
 
 //==============================================================================
+// Topology-preserving state-variable filter (Simper). Band-pass return, low-pass by reference.
+struct Svf
+{
+    float ic1 = 0.0f, ic2 = 0.0f, a1 = 1.0f, a2 = 0.0f, a3 = 0.0f;
+    void set (float hz, float q, float sampleRate)
+    {
+        const float g = std::tan (kPi * clampf (hz, 10.0f, sampleRate * 0.45f) / sampleRate);
+        const float k = 1.0f / std::max (0.3f, q);
+        a1 = 1.0f / (1.0f + g * (g + k)); a2 = g * a1; a3 = g * a2;
+    }
+    float process (float x, float& lp)
+    {
+        const float v3 = x - ic2;
+        const float v1 = a1 * ic1 + a2 * v3;
+        const float v2 = ic2 + a2 * ic1 + a3 * v3;
+        ic1 = 2.0f * v1 - ic1; ic2 = 2.0f * v2 - ic2;
+        lp = v2;
+        return v1;
+    }
+    float lowpass (float x) { float lp; process (x, lp); return lp; }
+    void reset() { ic1 = ic2 = 0.0f; }
+};
+
+// Vowel formants (F1, F2, F3) morphing oo > oh > ah > eh as v goes 0..1.
+inline void vowelFormants (float v, float* f)
+{
+    static const float table[4][3] { { 300, 870, 2240 }, { 570, 840, 2410 }, { 730, 1090, 2440 }, { 530, 1840, 2480 } };
+    const float x = clampf (v, 0.0f, 1.0f) * 2.999f;
+    const int i = (int) x;
+    const float t = x - (float) i;
+    for (int k = 0; k < 3; ++k) f[k] = table[i][k] + (table[i + 1][k] - table[i][k]) * t;
+}
+
+//==============================================================================
 // Granular player for a user sound: grains read from any position, at any pitch,
 // forwards or backwards, scattered in time and stereo.
 struct SampleData
 {
     std::vector<float> left, right;
     double sampleRate = 44100.0;
+    float rootMidi = -1.0f;   // the sound's main pitch (MIDI note), -1 = no clear pitch
     int length() const { return (int) left.size(); }
 };
 
@@ -665,6 +704,136 @@ struct GrainCloud
         // Normalise so density doesn't explode the level.
         const float norm = 1.0f / std::sqrt (1.0f + density * sizeSec);
         ol *= norm; orr *= norm;
+        l += ol; r += orr;
+        return 0.5f * (ol + orr);
+    }
+};
+
+//==============================================================================
+// CHORDS: a polyphonic layer that plays the current harmony chord. Voices are kept in
+// pitch order inside one octave window, so each voice only moves a step or two when the
+// chord changes (voice leading), and they glide or re-strike depending on the style.
+struct ChordLayer
+{
+    static constexpr int V = 6;
+    struct Voice
+    {
+        BlepOsc a, b;
+        double sph = 0.0;
+        float note = 60.0f, target = 60.0f, env = 0.0f, vibPh = 0.0f;
+        int gate = 0, delay = -1, pendingGate = 0;
+        bool held = false, active = false;
+    };
+    Voice v[V];
+    float targets[V] {};
+    int numTargets = 0;
+    float sr = 44100.0f;
+    Svf fl, fr;
+    int coefCounter = 0;
+    Random rng { 0xC40D5u };
+
+    void prepare (float sampleRate)
+    {
+        sr = sampleRate;
+        for (int i = 0; i < V; ++i) { v[i].a.phase = 0.13 * i; v[i].b.phase = 0.57 + 0.07 * i; v[i].vibPh = 0.19f * (float) i; }
+    }
+
+    // Close voicing: each chord tone once, folded into [centre - 6, centre + 6), sorted low to high.
+    // If the chord has fewer distinct notes than voices, the lowest notes are doubled an octave up.
+    void setChord (const float* notes, int count, int voices, float centre)
+    {
+        float out[V];
+        int n = 0;
+        for (int k = 0; k < count && n < voices; ++k)
+        {
+            float x = notes[k];
+            while (x < centre - 6.0f) x += 12.0f;
+            while (x >= centre + 6.0f) x -= 12.0f;
+            bool dup = false;
+            for (int j = 0; j < n; ++j) dup |= std::abs (out[j] - x) < 0.5f;
+            if (! dup) out[n++] = x;
+        }
+        if (n == 0) { numTargets = 0; return; }
+        std::sort (out, out + n);
+        const int distinct = n;
+        for (int j = 0; n < voices; ++j) out[n++] = out[j % distinct] + 12.0f * (float) (1 + j / distinct);
+        std::sort (out, out + n);
+        for (int j = 0; j < n; ++j) targets[j] = out[j];
+        numTargets = n;
+    }
+
+    // Sustained chord (PAD): voices hold and glide to the new chord tones.
+    void hold (bool on)
+    {
+        for (int i = 0; i < V; ++i)
+        {
+            v[i].held = on && i < numTargets;
+            if (v[i].held) { v[i].active = true; v[i].delay = -1; }
+        }
+    }
+
+    // Strike the chord: every voice jumps to its note and opens for gateSamples,
+    // the voices spaced by gapSamples (a strum) when gap > 0.
+    void strike (int gateSamples, int gapSamples)
+    {
+        for (int i = 0; i < V; ++i)
+        {
+            v[i].held = false;
+            if (i >= numTargets) continue;
+            v[i].active = true;
+            v[i].pendingGate = gateSamples;
+            v[i].delay = gapSamples * i;
+        }
+    }
+
+    float process (float glideCoef, float wave, float tone, float attack, float release, float width, float& l, float& r)
+    {
+        if (coefCounter-- <= 0)
+        {
+            coefCounter = 32;
+            const float cut = 120.0f * std::exp2 (tone * 7.2f);
+            fl.set (cut, 0.65f, sr); fr.set (cut * 1.04f, 0.65f, sr);
+        }
+        const float atk = onePoleCoef (std::max (0.002f, attack) / 3.0f, sr);
+        const float rel = onePoleCoef (std::max (0.01f, release) / 3.0f, sr);
+        float ol = 0.0f, orr = 0.0f;
+        for (int i = 0; i < V; ++i)
+        {
+            auto& vo = v[i];
+            if (vo.delay >= 0 && vo.delay-- == 0)
+            {
+                vo.note = vo.target = targets[std::min (i, std::max (0, numTargets - 1))];
+                vo.gate = vo.pendingGate;
+            }
+            if (vo.held) vo.target = targets[std::min (i, std::max (0, numTargets - 1))];
+            if (! vo.active) continue;
+            vo.note += (vo.target - vo.note) * glideCoef;
+
+            const bool open = vo.held || vo.gate > 0;
+            if (vo.gate > 0) --vo.gate;
+            vo.env += ((open ? 1.0f : 0.0f) - vo.env) * (open ? atk : rel);
+            if (! open && vo.env < 1.0e-5f) { vo.env = 0.0f; vo.active = false; continue; }
+
+            vo.vibPh += (0.17f + 0.031f * (float) i) / sr; if (vo.vibPh >= 1.0f) vo.vibPh -= 1.0f;
+            const float drift = 3.0f * std::sin (kTwoPi * vo.vibPh);                 // a few cents of slow life
+            const float det = 2.0f + 9.0f * width;                                    // the two saws, in cents
+            const float f = midiToHz (vo.note + drift * 0.01f);
+            const float fa = midiToHz (vo.note + (drift + det) * 0.01f), fb = midiToHz (vo.note + (drift - det) * 0.01f);
+            vo.sph += f / sr; if (vo.sph >= 1.0) vo.sph -= 1.0;
+            const float sine = std::sin (kTwoPi * (float) vo.sph);
+            const float tri = 1.0f - 4.0f * std::abs ((float) vo.sph - 0.5f);
+            const float saws = 0.5f * (vo.a.process (BlepOsc::Saw, fa, sr) + vo.b.process (BlepOsc::Saw, fb, sr));
+            // COLOUR: sine > soft triangle > two detuned saws.
+            const float w2 = wave * 2.0f;
+            const float s = w2 < 1.0f ? sine + (tri - sine) * w2 : tri + (saws * 0.9f - tri) * (w2 - 1.0f);
+            const float out = s * vo.env;
+            const float pan = width * (i % 2 == 0 ? -1.0f : 1.0f) * (0.35f + 0.13f * (float) i);
+            ol += out * (1.0f - pan);
+            orr += out * (1.0f + pan);
+        }
+        const float g = 0.15f;
+        ol = fl.lowpass (ol) * g;
+        orr = fr.lowpass (orr) * g;
         l += ol; r += orr;
         return 0.5f * (ol + orr);
     }

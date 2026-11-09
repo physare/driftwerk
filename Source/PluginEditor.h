@@ -158,6 +158,8 @@ class PerformPanel : public juce::Component
 {
 public:
     PerformPanel (DriftwerkProcessor& p, MainView& v);
+    // The attachments must go before the buttons they watch (some buttons are declared after them).
+    ~PerformPanel() override { bAtt.clear(); cAtt.clear(); sAtt.clear(); }
     void paint (juce::Graphics&) override;
     bool hitTest (int x, int y) override { return tab != Organism || y < 34; }
     void mouseDown (const juce::MouseEvent&) override;
@@ -165,7 +167,7 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void refresh();                                    // called by the UI timer
 
-    enum Tab { Sequence, ArpSound, Drone, Harmony, Organism };
+    enum Tab { Sequence, ArpSound, Drone, Chords, Harmony, Organism, NumTabs };
     void setTab (int t);
 
 private:
@@ -180,7 +182,8 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> cAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> bAtt;
-    juce::TextButton tabButtons[5];
+    juce::TextButton tabButtons[NumTabs];
+    juce::TextButton chordsOnButton { "CHORDS ON" };
     juce::TextButton holdButton { "HOLD" }, recButton { "REC NOTES" }, newButton { "NEW" }, clearButton { "CLEAR" },
                      leftButton { "<" }, rightButton { ">" }, saveButton { "SAVE" };
     juce::TextButton slotButtons[DriftwerkProcessor::numSlots];
@@ -280,7 +283,11 @@ private:
 
     juce::ComboBox presetBox;
     juce::TextButton sceneButton { "NEW SCENE" }, randomButton { "RANDOM PATCH" }, clearButton { "PULL ALL" },
-                     dimButton { "DIM CABLES" }, loadButton { "LOAD SOUND" };
+                     dimButton { "DIM CABLES" }, loadButton { "LOAD SOUND" }, keyButton { "IN KEY" };
+    juce::ComboBox soundBox;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> soundAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> keyAtt;
+    void useMyFile();
     std::unique_ptr<juce::FileChooser> chooser;
 
     juce::String lastPatch;

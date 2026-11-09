@@ -32,7 +32,8 @@ The interface is a 90s-style modular rack with real drag-and-drop patch cables.
 ## Ambient engine (new)
 
 * **DREAM**: five soft voices on loops of unrelated lengths (17 to 32 seconds), so they drift in and out of phase, Eno style. WARP adds warped-cassette detune.
-* **GRAIN**: drop any sound file (wav, aiff, flac, ogg, mp3) onto the waveform, or click LOAD SOUND. POSITION, SPRAY, SIZE, DENSITY, PITCH, REVERSE and SCAN pull it apart. It starts with a built-in glass choir.
+* **GRAIN**: pick one of eight built-in sounds from the menu (glass choir, bowed metal, tape piano, vox pad, music box, wind organ, string dust, tuned rain), or drop any sound file (wav, aiff, flac, ogg, mp3) onto the waveform or click LOAD SOUND (it becomes MY FILE, and stays loaded when you change presets). POSITION, SPRAY, SIZE, DENSITY, PITCH, REVERSE and SCAN pull it apart.
+* **IN KEY** (on by default) keeps GRAIN in tune: Timewind finds the main pitch of your file and moves it onto the current chord root, and PITCH snaps to octaves (and fifths, when the scale has the notes for them). The built-in sounds use only a root and a fifth, so they fit every chord. A sound with no clear pitch (noise, drums) only snaps to octaves.
 * **TAPE**: wow, age, hiss and crush on the whole mix, for that worn Boards-of-Canada warmth.
 * **HALL SHIMMER**: an octave-up cloud feeding back into the reverb.
 * DREAM and GRAIN play straight into the output until you patch their OUT jacks somewhere else.
@@ -63,11 +64,12 @@ They are also mod sources: right-click any knob.
 
 ## Performance panel (top middle)
 
-The panel over the slime mold has five tabs:
+The panel over the slime mold has six tabs:
 
 * **SEQUENCE**: the arp's 16 steps. **HOLD** freezes the pattern so it repeats exactly. Click a step to switch it on or off, drag up and down to set its note (drag across steps to draw a line). **REC NOTES** lets you play a MIDI keyboard into the running sequence. **NEW** writes a fresh singable pattern, **CLEAR** empties it, **< >** shift it. **SAVE** then a number stores the sequence in that slot; a number on its own recalls it. Slots are shared by every Timewind on your computer.
 * **ARP SOUND**: octave, glide, soft attack, pluck length, brightness, resonance, drive, detune, echo and level of the arp voice.
-* **DRONE**: chord, octave, detune, drift, level, tone, saw-to-soft wave, breath (each voice swells on its own slow cycle), air (breathy noise) and sub.
+* **DRONE**: TYPE picks what the six voices are made of: **SAWS** (the original), **ORGAN** (drawbars), **STRINGS** (an old string machine, two saws per voice), **GLASS** (shimmering FM bells, whole-number ratios so it stays in tune) or **CHOIR** (saws through moving vowel formants). COLOUR shapes each type: saw to soft, more drawbars, a wider ensemble, more shimmer, or the vowel from oo to ah to eh. Then chord, octave, detune, drift, level, tone, breath (each voice swells on its own slow cycle), air (breathy noise) and sub.
+* **CHORDS**: a second layer that plays chords. It always plays the current HARMONY chord (the same one as the pads, and the arp in PADS mode), with smooth voice leading, so it is in tune with everything. When the arp plays the whole SCALE, chord notes outside the scale are left out. STYLE: **PAD** (held, gliding between chords), **SWELL** (fades in every 2 bars), **PULSE** (on every beat), **ARP HITS** (a chord with every arp note) or **STRUM** (strummed every bar). VOICES, OCTAVE, COLOUR (sine to soft to two detuned saws), TONE, ATTACK, RELEASE and WIDTH shape it. "Now playing" shows its notes.
 * **HARMONY**: chord progressions. PEACEFUL, DREAMY and DRIFTING move pads, drone and arp together through chords that stay in key, every 1 to 16 bars. CREEPY slides between outside chords. CHORD GLIDE sets how slowly they slide. NEW SCENE KEY decides whether a new scene keeps the key, moves to a nearby key or jumps anywhere.
 * **ORGANISM**: just the slime mold.
 
@@ -96,6 +98,7 @@ The preset menu is grouped from calm to strange. Every preset stays in key with 
 * **Soundbath** (no plucks, all breath): Drift Cathedral, Singing Bowls, Low Tide Breathing, Cathedral Ghosts, Airport Tapes.
 * **Plucks + sequences**: Mirror Sequence, Berlin Night Drive, Glass Harp, Kalimba Rain, Toy Piano Ghost, Black Tide, Pulse Engine.
 * **Weird**: Warped Cassette, Insect Choir, Broken Radio Prayer, Gravity Well, Clockwork Jellyfish.
+* **Chords + textures** (the drone types, the CHORDS layer and the built-in GRAIN sounds): Choir Of Rooms, Organ Sunday, Glass Weather, String Machine Dawn, Rain Stabs, Bowed Iron Creep.
 * **Hands (camera)**: Hand Garden, Hand Weather, Puppet Strings (each gesture plays the next note), Theremin Fog (hand height is pitch, pinch to sound it).
 
 ## Building

@@ -62,6 +62,11 @@ const int chords[6][6] {
 
 const juce::StringArray lfoShapeNames { "SINE", "TRI", "S&H", "DRIFT" };
 
+// Drone TYPE: what each of the six drone voices is made of. COLOUR (drn.wave) shapes each type.
+const juce::StringArray droneTypeNames { "SAWS", "ORGAN", "STRINGS", "GLASS", "CHOIR" };
+// CHORDS layer styles.
+const juce::StringArray chordStyleNames { "PAD", "SWELL", "PULSE", "ARP HITS", "STRUM" };
+
 using NRange = juce::NormalisableRange<float>;
 
 NRange skewed (float lo, float hi, float centre)
@@ -152,7 +157,7 @@ const std::vector<Preset>& presets()
             { "arp.density", 0.45f }, { "arp.mutate", 0.3f }, { "arp.walk", 0.4f }, { "arp.gate", 0.1f },
             { "vco1.fm", 0.35f }, { "vco2.oct", 1 }, { "env1.d", 0.18f }, { "env1.r", 0.25f },
             { "vcf1.cut", 1400 }, { "vcf1.res", 0.35f }, { "vcf1.cv2", 0.0f },
-            { "grain.level", 0.3f }, { "grain.pitch", 12 }, { "grain.size", 0.05f }, { "grain.density", 1 }, { "grain.spray", 0.9f },
+            { "grain.src", 4 }, { "grain.level", 0.3f }, { "grain.pitch", 12 }, { "grain.size", 0.05f }, { "grain.density", 1 }, { "grain.spray", 0.9f },
             { "dream.chord", 1 }, { "dream.level", 0.3f }, { "drn.level", 0.3f }, { "drn.chord", 1 },
             { "echo.div", 1 }, { "echo.fb", 0.5f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f } } },
         { "Plucks + sequences", "Toy Piano Ghost",
@@ -161,6 +166,7 @@ const std::vector<Preset>& presets()
             { "arp.gate", 0.2f }, { "vco1.oct", 1 }, { "vco2.oct", 2 }, { "vco2.fine", 0.05f }, { "vco1.pw", 0.3f },
             { "env1.d", 0.25f }, { "vcf1.cut", 2200 }, { "vcf1.res", 0.2f }, { "vcf1.cv2", 0.0f },
             { "tape.wow", 0.6f }, { "tape.age", 0.6f }, { "tape.crush", 0.2f }, { "tape.hiss", 0.3f },
+            { "grain.src", 2 }, { "grain.level", 0.3f }, { "grain.size", 0.5f },
             { "dream.chord", 0 }, { "dream.warp", 0.7f }, { "dream.level", 0.45f }, { "drn.level", 0.25f }, { "drn.chord", 2 },
             { "echo.div", 3 }, { "echo.mix", 0.3f }, { "hall.mix", 0.5f } } },
         { "Plucks + sequences", "Black Tide",
@@ -221,6 +227,62 @@ const std::vector<Preset>& presets()
             { "lfo1.rate", 0.4f }, { "lfo2.rate", 0.05f }, { "vco1.pwm", 0.8f },
             { "grain.level", 0.35f }, { "grain.pitch", 24 }, { "grain.size", 0.04f }, { "grain.density", 1 },
             { "dream.chord", 5 }, { "dream.level", 0.3f }, { "echo.div", 4 }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f } } },
+
+        //======================================================================  CHORDS + TEXTURES: drone types, the chord layer, built-in grain sounds
+        { "Chords + textures", "Choir Of Rooms", DRONE_OUT "lfo1.out>vcf2.cv1",
+          { { "drn.type", 4 }, { "drn.wave", 0.55f }, { "drn.breath", 0.45f }, { "drn.oct", -1 }, { "drn.chord", 1 }, { "drn.level", 0.6f },
+            { "vcf2.cut", 3200 }, { "vcf2.res", 0.1f }, { "vcf2.cv1", 0.2f }, { "lfo1.rate", 0.02f },
+            { "chd.on", 1 }, { "chd.mode", 0 }, { "chd.level", 0.35f }, { "chd.voices", 4 }, { "chd.wave", 0.08f }, { "chd.tone", 0.45f },
+            { "chd.attack", 3.0f }, { "chd.release", 6.0f }, { "chd.width", 0.8f },
+            { "prog.mode", 1 }, { "prog.bars", 3 }, { "prog.glide", 0.55f }, { "arp.on", 0 }, { "out.lvl1", 0 },
+            { "grain.src", 3 }, { "grain.level", 0.3f }, { "grain.size", 0.9f }, { "grain.density", 4 }, { "grain.spray", 0.6f },
+            { "dream.level", 0.25f }, { "hall.size", 0.95f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.35f }, { "out.ens", 0.6f } } },
+        { "Chords + textures", "Organ Sunday", DRONE_OUT,
+          { { "drn.type", 1 }, { "drn.wave", 0.6f }, { "drn.oct", -2 }, { "drn.chord", 2 }, { "drn.level", 0.55f }, { "drn.breath", 0.2f },
+            { "vcf2.cut", 4000 }, { "vcf2.res", 0.05f },
+            { "chd.on", 1 }, { "chd.mode", 1 }, { "chd.level", 0.4f }, { "chd.voices", 5 }, { "chd.wave", 0.25f }, { "chd.tone", 0.5f },
+            { "chd.attack", 1.6f }, { "chd.release", 4.0f },
+            { "prog.mode", 2 }, { "prog.bars", 2 }, { "prog.glide", 0.3f }, { "arp.on", 0 }, { "out.lvl1", 0 },
+            { "arp.scale", 6 }, { "arp.root", 41 }, { "dream.chord", 0 }, { "dream.level", 0.2f },
+            { "grain.src", 5 }, { "grain.level", 0.25f }, { "grain.pitch", 12 }, { "grain.size", 0.7f }, { "grain.density", 5 },
+            { "hall.size", 0.9f }, { "hall.mix", 0.55f }, { "tape.wow", 0.1f } } },
+        { "Chords + textures", "Glass Weather",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;lfo2.out>vco1.pwm;" DRONE_OUT,
+          { { "drn.type", 3 }, { "drn.wave", 0.45f }, { "drn.level", 0.35f }, { "drn.chord", 2 }, { "vcf2.cut", 5000 }, { "vcf2.res", 0.0f },
+            { "chd.on", 1 }, { "chd.mode", 4 }, { "chd.level", 0.45f }, { "chd.voices", 5 }, { "chd.wave", 0.15f }, { "chd.tone", 0.7f },
+            { "chd.attack", 0.004f }, { "chd.release", 3.0f }, { "chd.width", 0.9f },
+            { "prog.mode", 3 }, { "prog.bars", 1 }, { "arp.follow", 1 }, { "arp.range", 3 }, { "arp.density", 0.55f }, { "arp.gate", 0.15f },
+            { "clk.div", 3 }, { "vco1.oct", 1 }, { "env1.d", 0.15f }, { "vcf1.cut", 1200 }, { "vcf1.cv2", 0.0f }, { "out.lvl1", 0.45f },
+            { "grain.src", 4 }, { "grain.level", 0.3f }, { "grain.pitch", 12 }, { "grain.size", 0.25f }, { "grain.density", 6 }, { "grain.spray", 0.8f },
+            { "dream.level", 0.2f }, { "echo.div", 2 }, { "echo.fb", 0.55f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f }, { "hall.shimmer", 0.45f } } },
+        { "Chords + textures", "String Machine Dawn",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.sub>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
+          { { "drn.type", 2 }, { "drn.wave", 0.75f }, { "drn.oct", -1 }, { "drn.chord", 1 }, { "drn.level", 0.45f }, { "vcf2.cut", 2200 },
+            { "chd.on", 1 }, { "chd.mode", 2 }, { "chd.level", 0.3f }, { "chd.voices", 4 }, { "chd.wave", 0.85f }, { "chd.tone", 0.35f },
+            { "chd.attack", 0.02f }, { "chd.release", 0.45f },
+            { "prog.mode", 1 }, { "prog.bars", 2 }, { "arp.follow", 0 }, { "arp.len", 8 }, { "arp.mutate", 0.05f }, { "arp.density", 0.9f },
+            { "clk.div", 3 }, { "vco2.oct", -1 }, { "vcf1.cut", 320 }, { "vcf1.res", 0.7f }, { "vcf1.cv2", 0.6f }, { "lfo1.rate", 0.015f },
+            { "env1.d", 0.2f }, { "out.lvl1", 0.55f },
+            { "grain.src", 6 }, { "grain.level", 0.3f }, { "grain.size", 0.8f }, { "grain.density", 4 },
+            { "tape.wow", 0.35f }, { "tape.age", 0.45f }, { "tape.hiss", 0.25f }, { "out.ens", 0.75f },
+            { "echo.div", 2 }, { "echo.mix", 0.3f }, { "hall.mix", 0.45f } } },
+        { "Chords + textures", "Rain Stabs",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;arp.gate>grain.trig;" DRONE_OUT,
+          { { "drn.type", 3 }, { "drn.level", 0.25f }, { "drn.wave", 0.2f }, { "vcf2.cut", 3000 },
+            { "chd.on", 1 }, { "chd.mode", 3 }, { "chd.level", 0.4f }, { "chd.voices", 3 }, { "chd.wave", 0.5f }, { "chd.tone", 0.6f },
+            { "chd.attack", 0.003f }, { "chd.release", 0.35f }, { "chd.oct", -1 },
+            { "prog.mode", 2 }, { "prog.bars", 1 }, { "arp.follow", 1 }, { "arp.density", 0.6f }, { "arp.gate", 0.12f }, { "clk.div", 3 },
+            { "env1.d", 0.12f }, { "vcf1.cut", 900 }, { "out.lvl1", 0.35f },
+            { "grain.src", 7 }, { "grain.level", 0.45f }, { "grain.size", 0.35f }, { "grain.density", 9 }, { "grain.spray", 0.9f },
+            { "echo.div", 1 }, { "echo.fb", 0.5f }, { "echo.mix", 0.35f }, { "hall.mix", 0.45f } } },
+        { "Chords + textures", "Bowed Iron Creep", DRONE_OUT "lfo1.out>vcf2.cv1;lfo2.out>vcf2.cv2",
+          { { "prog.mode", 4 }, { "prog.bars", 2 }, { "prog.glide", 0.7f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 2 }, { "arp.root", 38 },
+            { "drn.type", 0 }, { "drn.chord", 5 }, { "drn.oct", -2 }, { "drn.detune", 0.7f }, { "drn.level", 0.5f }, { "drn.air", 0.3f },
+            { "vcf2.cut", 420 }, { "vcf2.res", 0.6f }, { "vcf2.cv1", 0.5f }, { "lfo1.rate", 0.03f }, { "lfo2.shape", 3 },
+            { "chd.on", 1 }, { "chd.mode", 0 }, { "chd.level", 0.35f }, { "chd.voices", 6 }, { "chd.oct", -1 }, { "chd.wave", 0.9f },
+            { "chd.tone", 0.25f }, { "chd.attack", 4.0f }, { "chd.release", 8.0f },
+            { "grain.src", 1 }, { "grain.level", 0.45f }, { "grain.pitch", -12 }, { "grain.reverse", 0.7f }, { "grain.size", 1.0f },
+            { "dream.level", 0.15f }, { "dream.warp", 0.8f }, { "hall.size", 0.98f }, { "hall.mix", 0.6f }, { "echo.div", 5 }, { "echo.fb", 0.7f } } },
 
         //======================================================================  HANDS: the camera plays it
         { "Hands (camera)", "Hand Garden", nullptr,
@@ -314,7 +376,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("drn.drift", "Drone Drift", NRange (0.0f, 1.0f), 0.5f);
     fl ("drn.level", "Drone Level", NRange (0.0f, 1.0f), 0.7f);
     fl ("drn.tone", "Drone Tone", NRange (0.0f, 1.0f), 1.0f);
-    fl ("drn.wave", "Drone Wave (saw to soft)", NRange (0.0f, 1.0f), 0.0f);
+    fl ("drn.wave", "Drone Colour", NRange (0.0f, 1.0f), 0.0f);
     fl ("drn.breath", "Drone Breath", NRange (0.0f, 1.0f), 0.0f);
     fl ("drn.air", "Drone Air", NRange (0.0f, 1.0f), 0.0f);
     fl ("drn.sub", "Drone Sub", NRange (0.0f, 1.0f), 0.0f);
@@ -404,6 +466,20 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     bo ("cam.hands", "Hand Skeleton", true);
     fl ("cam.sens", "Camera Sensitivity", NRange (0.0f, 1.0f), 0.5f);
     fl ("cam.slew", "Camera Smoothing", NRange (0.0f, 1.0f), 0.3f);
+    // Drone types, GRAIN sounds and the CHORDS layer (kept at the end so older sets load cleanly)
+    ch ("drn.type", "Drone Type", droneTypeNames, 0);
+    ch ("grain.src", "Grain Sound", grainSourceNames(), 0);
+    bo ("grain.key", "Grain In Key", true);
+    bo ("chd.on", "Chords On", false);
+    ch ("chd.mode", "Chords Style", chordStyleNames, 0);
+    fl ("chd.level", "Chords Level", NRange (0.0f, 1.0f), 0.45f);
+    in ("chd.voices", "Chords Voices", 3, 6, 4);
+    in ("chd.oct", "Chords Octave", -2, 1, 0);
+    fl ("chd.wave", "Chords Colour", NRange (0.0f, 1.0f), 0.3f);
+    fl ("chd.tone", "Chords Tone", NRange (0.0f, 1.0f), 0.55f);
+    fl ("chd.attack", "Chords Attack", skewed (0.002f, 8.0f, 0.6f), 0.9f);
+    fl ("chd.release", "Chords Release", skewed (0.02f, 12.0f, 1.5f), 2.5f);
+    fl ("chd.width", "Chords Width", NRange (0.0f, 1.0f), 0.6f);
 
     return { ps.begin(), ps.end() };
 }
@@ -438,7 +514,9 @@ DriftwerkProcessor::DriftwerkProcessor()
             mods.push_back (std::make_unique<ModSlot>());
         }
     effective.resize (paramList.size(), 0.0f);
-    makeDefaultSample();
+    for (auto& c : chordNotes) c.store (0);
+    syncGrainSource();
+    apvts.addParameterListener ("grain.src", this);
 
     cameraPoller = std::make_unique<CameraPoller> (*this);
 }
@@ -450,36 +528,34 @@ int DriftwerkProcessor::paramIndex (const juce::String& id) const
 }
 
 //==============================================================================
-void DriftwerkProcessor::makeDefaultSample()
+juce::StringArray DriftwerkProcessor::grainSourceNames()
 {
-    // A few seconds of synthetic "glass choir": stacked soft partials with slow beating
-    // and a breath of noise, so GRAIN has something to chew on before you load a file.
-    auto sd = std::make_unique<SampleData>();
-    const double fs = 44100.0;
-    const int n = (int) (fs * 6.0);
-    sd->sampleRate = fs;
-    sd->left.resize ((size_t) n); sd->right.resize ((size_t) n);
-    const float notes[] { 57.0f, 64.0f, 69.0f, 71.0f, 76.0f, 81.0f };
-    Random rng (0xFEEDu);
-    float nlp = 0.0f;
-    for (int i = 0; i < n; ++i)
+    juce::StringArray names;
+    for (auto* n : dw::builtInSoundNames) names.add (n);
+    names.add ("MY FILE");
+    return names;
+}
+
+juce::String DriftwerkProcessor::getSampleName() const
+{
+    const int src = (int) std::lround (apvts.getRawParameterValue ("grain.src")->load());
+    if (src == myFileSource && userSample != nullptr) return juce::File (samplePath).getFileName();
+    if (src == myFileSource) return "no file loaded yet: drop one here (playing glass choir)";
+    return "built-in: " + grainSourceNames()[juce::jlimit (0, myFileSource - 1, src)].toLowerCase();
+}
+
+void DriftwerkProcessor::syncGrainSource()
+{
+    const int src = juce::jlimit (0, myFileSource, (int) std::lround (apvts.getRawParameterValue ("grain.src")->load()));
+    SampleData* want = nullptr;
+    if (src == myFileSource) want = userSample;
+    if (want == nullptr)
     {
-        const float t = (float) i / (float) fs;
-        float l = 0.0f, r = 0.0f;
-        for (int k = 0; k < 6; ++k)
-        {
-            const float f = midiToHz (notes[k]);
-            const float swell = 0.5f - 0.5f * std::cos (kTwoPi * t / (2.0f + (float) k * 0.7f));
-            l += std::sin (kTwoPi * f * t) * swell * 0.12f;
-            r += std::sin (kTwoPi * f * 1.003f * t + (float) k) * swell * 0.12f;
-        }
-        nlp += (rng.next() - nlp) * 0.05f;
-        const float edge = std::min (1.0f, std::min (t, 6.0f - t) * 4.0f);
-        sd->left[(size_t) i] = (l + nlp * 0.05f) * edge;
-        sd->right[(size_t) i] = (r + nlp * 0.05f) * edge;
+        const int b = src == myFileSource ? 0 : src;
+        if (builtIns[b] == nullptr) builtIns[b] = dw::makeBuiltInSound (b);   // made once, then kept
+        want = builtIns[b].get();
     }
-    currentSample.store (sd.get());
-    sampleStore.push_back (std::move (sd));
+    if (currentSample.load() != want) currentSample.store (want, std::memory_order_release);
 }
 
 bool DriftwerkProcessor::loadSample (const juce::File& f)
@@ -490,6 +566,7 @@ bool DriftwerkProcessor::loadSample (const juce::File& f)
     if (reader == nullptr) return false;
 
     const int maxLen = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 90.0));
+    if (maxLen < 256) return false;
     juce::AudioBuffer<float> buf ((int) juce::jmax (1u, reader->numChannels), maxLen);
     reader->read (&buf, 0, maxLen, 0, true, true);
 
@@ -503,12 +580,15 @@ bool DriftwerkProcessor::loadSample (const juce::File& f)
     for (int i = 0; i < maxLen; ++i) peak = std::max ({ peak, std::abs (sd->left[(size_t) i]), std::abs (sd->right[(size_t) i]) });
     if (peak > 0.0001f)
         for (int i = 0; i < maxLen; ++i) { sd->left[(size_t) i] *= 0.7f / peak; sd->right[(size_t) i] *= 0.7f / peak; }
+    // Find its pitch so IN KEY can move it into Timewind's key.
+    sd->rootMidi = dw::detectRootMidi (*sd);
 
-    currentSample.store (sd.get());
+    userSample = sd.get();
     sampleStore.push_back (std::move (sd));
-    // Free samples older than the previous one; the audio thread only ever holds the current or previous.
+    // Free user sounds older than the previous one; the audio thread only ever holds the current or previous.
     while (sampleStore.size() > 3) sampleStore.erase (sampleStore.begin());
     samplePath = f.getFullPathName();
+    syncGrainSource();
     updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
     return true;
 }
@@ -568,6 +648,7 @@ void DriftwerkProcessor::rollScene()
     set ("grain.reverse", r.nextFloat() * 0.7f);
     set ("echo.div", (float) r.nextInt (6));
     set ("vco2.oct", (float) (r.nextInt (3) - 1));
+    if (r.nextFloat() < 0.4f) set ("drn.type", (float) r.nextInt (5));
     if (apvts.getRawParameterValue ("arp.hold")->load() < 0.5f)
         set ("arp.len", (float) (4 + r.nextInt (13)));
     randomisePatch();
@@ -607,6 +688,8 @@ void DriftwerkProcessor::setModFromString (const juce::String& s)
 
 DriftwerkProcessor::~DriftwerkProcessor()
 {
+    apvts.removeParameterListener ("grain.src", this);
+    cancelPendingUpdate();
     stopRecording();
     cameraPoller = nullptr;
     camera.close();
@@ -654,6 +737,8 @@ void DriftwerkProcessor::prepareToPlay (double sampleRate, int)
     reverb.prepare ((float) sr);
     dream.prepare ((float) sr);
     grains.prepare ((float) sr);
+    chordLayer.prepare ((float) sr);
+    chdLastKey = -1;
     tape.prepare ((float) sr);
     arp.clockPeriod = (int) (sr * 0.15);
 }
@@ -863,7 +948,11 @@ void DriftwerkProcessor::updateBlockParams()
     p.arpOn = f ("arp.on") > 0.5f; p.arpFollow = i ("arp.follow");
     p.hold = f ("arp.hold") > 0.5f; p.arpOct = i ("arp.oct"); p.glide = f ("arp.glide");
     p.droneTone = f ("drn.tone"); p.droneWave = f ("drn.wave"); p.droneBreath = f ("drn.breath");
-    p.droneAir = f ("drn.air"); p.droneSub = f ("drn.sub");
+    p.droneAir = f ("drn.air"); p.droneSub = f ("drn.sub"); p.droneType = i ("drn.type");
+    p.grainKey = f ("grain.key") > 0.5f;
+    p.chdOn = f ("chd.on") > 0.5f; p.chdMode = i ("chd.mode"); p.chdVoices = i ("chd.voices"); p.chdOct = i ("chd.oct");
+    p.chdLevel = f ("chd.level"); p.chdWave = f ("chd.wave"); p.chdTone = f ("chd.tone");
+    p.chdAttack = f ("chd.attack"); p.chdRelease = f ("chd.release"); p.chdWidth = f ("chd.width");
     p.progMode = i ("prog.mode"); p.progBars = progBars[juce::jlimit (0, 4, i ("prog.bars"))]; p.progGlide = f ("prog.glide");
     p.vco1Oct = i ("vco1.oct"); p.vco1Fine = f ("vco1.fine"); p.vco1Pw = f ("vco1.pw"); p.vco1Pwm = f ("vco1.pwm"); p.vco1Fm = f ("vco1.fm");
     p.vco2Oct = i ("vco2.oct"); p.vco2Fine = f ("vco2.fine"); p.vco2Pw = f ("vco2.pw"); p.vco2Pwm = f ("vco2.pwm"); p.vco2Fm = f ("vco2.fm");
@@ -901,6 +990,101 @@ void DriftwerkProcessor::updateBlockParams()
 }
 
 //==============================================================================
+// Chord progression: four chords, each held for prog.bars bars. Run every sample so the
+// pads, drone, arp and CHORDS all change on the same sample, right on the bar line.
+void DriftwerkProcessor::applyProgression (double beat)
+{
+    if (p.progMode > 0)
+    {
+        const int family = (p.scale == 6 || p.scale == 7) ? 1 : 0;
+        const int idx = (int) std::floor (beat / (4.0 * p.progBars)) & 3;
+        const auto& c = progTable[p.progMode][family][idx];
+        chordOffsetTarget = c.offset > 6 ? c.offset - 12 : c.offset;   // keep roots close: move down rather than far up
+        p.dreamChord = c.dream;
+        p.droneChord = c.drone;
+        if (progIndex.load (std::memory_order_relaxed) != idx) progIndex.store (idx, std::memory_order_relaxed);
+    }
+    else
+    {
+        chordOffsetTarget = 0;
+        if (progIndex.load (std::memory_order_relaxed) != -1) progIndex.store (-1, std::memory_order_relaxed);
+    }
+}
+
+//==============================================================================
+// CHORDS layer: plays the same chord as the pads (and the arp in PADS mode), voice-led.
+// With the arp on SCALE, chord tones outside the scale are left out, so it can never clash.
+void DriftwerkProcessor::updateChordLayer()
+{
+    const int keyRoot = p.root + midiTranspose;
+    const int dc = juce::jlimit (0, 5, p.dreamChord);
+    const int key = (((((((keyRoot + 64) * 32 + chordOffsetTarget + 12) * 8 + dc) * 8 + p.chdVoices) * 8 + (p.chdOct + 4)) * 16
+                     + p.scale) * 4 + p.arpFollow);
+    bool changed = false;
+    if (key != chdLastKey)
+    {
+        chdLastKey = key;
+        changed = true;
+        const float root = (float) keyRoot + p.tune + (float) chordOffsetTarget;
+        const auto& sc = scales[(size_t) juce::jlimit (0, (int) scales.size() - 1, p.scale)];
+        float notes[6];
+        int n = 0;
+        for (int k = 0; k < 6; ++k)
+        {
+            const int iv = dreamChords[dc][k];
+            const int pc = ((chordOffsetTarget + iv) % 12 + 12) % 12;
+            const bool inScale = std::find (sc.begin(), sc.end(), pc) != sc.end();
+            if (k == 0 || p.arpFollow != 0 || inScale) notes[n++] = root + (float) iv;
+        }
+        const float centre = (float) keyRoot + p.tune + 24.0f + 12.0f * (float) p.chdOct;
+        chordLayer.setChord (notes, n, juce::jlimit (3, 6, p.chdVoices), centre);
+        for (int i = 0; i < dw::ChordLayer::V; ++i)
+            chordNotes[(size_t) i].store (i < chordLayer.numTargets ? (int) std::lround (chordLayer.targets[i] - p.tune) : 0, std::memory_order_relaxed);
+    }
+    chordNoteCount.store (p.chdOn ? chordLayer.numTargets : 0, std::memory_order_relaxed);
+
+    if (! p.chdOn)
+    {
+        if (chdWasOn) chordLayer.hold (false);
+        chdWasOn = false;
+        chdLastBeat = -1;
+        return;
+    }
+    const int mode = juce::jlimit (0, 4, p.chdMode);
+    if (mode != chdLastMode || ! chdWasOn)
+    {
+        chordLayer.hold (false);
+        chdLastBeat = -1;
+        chdLastMode = mode;
+        changed = true;
+    }
+    chdWasOn = true;
+
+    const double spb = samplesPerBeat;
+    auto unitChanged = [this] (double beatsPerUnit)
+    {
+        const long long u = (long long) std::floor (curBeat / beatsPerUnit);
+        if (u == chdLastBeat) return false;
+        chdLastBeat = u;
+        return true;
+    };
+    switch (mode)
+    {
+        case 0: chordLayer.hold (true); break;                                                    // PAD
+        case 1: if (unitChanged (8.0) || changed) chordLayer.strike ((int) (spb * 5.0), 0); break; // SWELL every 2 bars
+        case 2: if (unitChanged (1.0) || changed) chordLayer.strike ((int) (spb * 0.5), 0); break; // PULSE on the beat
+        case 3:                                                                                   // ARP HITS
+        {
+            const bool g = arp.gateOut;
+            if (g && ! chdLastArpGate) chordLayer.strike (juce::jmax (64, arp.gateLeft), 0);
+            chdLastArpGate = g;
+            break;
+        }
+        default: if (unitChanged (4.0) || changed) chordLayer.strike ((int) spb, (int) (sr * 0.045)); break; // STRUM
+    }
+}
+
+//==============================================================================
 void DriftwerkProcessor::renderSample (float& outL, float& outR)
 {
     const float fsr = (float) sr;
@@ -914,6 +1098,8 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
         beatPos += 1.0 / samplesPerBeat;
         beat = beatPos;
     }
+    curBeat = beat;
+    applyProgression (beat);
     if (p.clkRun)
     {
         const double div = clockDivBeats[juce::jlimit (0, 5, p.clkDiv)];
@@ -978,21 +1164,74 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
         const float detuneCents[6] { -1.0f, 1.0f, -0.55f, 0.55f, -0.25f, 0.3f };
         const float dronePitch = chordBase + 12.0f * ((float) p.droneOct + in (I_DRONE_PITCH));
         const int* chord = chords[juce::jlimit (0, 5, p.droneChord)];
+        const int type = juce::jlimit (0, 4, p.droneType);
+        const float c = p.droneWave;                                          // COLOUR, read differently by each type
         float sum = 0.0f, breathAvg = 0.0f;
         for (int k = 0; k < 6; ++k)
         {
             droneDrift[k] += (droneDriftTarget[k] - droneDrift[k]) * driftCoef;
             const float cents = detuneCents[k] * p.droneDetune * 22.0f + droneDrift[k] * p.droneDriftAmt * 18.0f;
-            const float note = dronePitch + (float) chord[k] + cents * 0.01f;
-            const float saw = droneOsc[k].process (BlepOsc::Saw, midiToHz (note), sr);
-            const float ph = (float) droneOsc[k].phase;
-            const float tri = 1.0f - 4.0f * std::abs (ph - 0.5f);           // soft, flute-like
+            float note = dronePitch + (float) chord[k] + cents * 0.01f;
             // Each voice breathes on its own slow cycle (8 to 20 seconds).
             droneBreathPh[k] += (0.05f + 0.016f * (float) k) / fsr;
             if (droneBreathPh[k] >= 1.0f) droneBreathPh[k] -= 1.0f;
             const float br = 1.0f - p.droneBreath * (0.5f + 0.5f * std::sin (kTwoPi * droneBreathPh[k]));
             breathAvg += br;
-            sum += (saw + (tri - saw) * p.droneWave) * br;
+
+            float v = 0.0f;
+            if (type == 0)
+            {   // SAWS: bright saw > soft triangle
+                const float saw = droneOsc[k].process (BlepOsc::Saw, midiToHz (note), sr);
+                const float ph = (float) droneOsc[k].phase;
+                const float tri = 1.0f - 4.0f * std::abs (ph - 0.5f);
+                v = saw + (tri - saw) * c;
+            }
+            else if (type == 2)
+            {   // STRINGS: two saws per voice with a slow chorus, like an old string machine.
+                // COLOUR widens the ensemble.
+                droneVibPh[k] += (0.37f + 0.09f * (float) k) / fsr; if (droneVibPh[k] >= 1.0f) droneVibPh[k] -= 1.0f;
+                const float spread = (4.0f + 14.0f * c) * (1.0f + 0.35f * std::sin (kTwoPi * droneVibPh[k]));
+                v = 0.68f * (droneOsc[k].process (BlepOsc::Saw, midiToHz (note + spread * 0.01f), sr)
+                           + droneOsc2[k].process (BlepOsc::Saw, midiToHz (note - spread * 0.01f), sr));
+            }
+            else
+            {
+                if (type == 4)
+                {   // CHOIR: a gentle vibrato on each voice
+                    droneVibPh[k] += (4.7f + 0.23f * (float) k) / fsr; if (droneVibPh[k] >= 1.0f) droneVibPh[k] -= 1.0f;
+                    note += 0.09f * std::sin (kTwoPi * droneVibPh[k]);
+                    v = droneOsc[k].process (BlepOsc::Saw, midiToHz (note), sr);
+                }
+                else
+                {
+                    auto& ph = droneOsc[k].phase;
+                    ph += midiToHz (note) / sr; if (ph >= 1.0) ph -= 1.0;
+                    const float x = kTwoPi * (float) ph;
+                    if (type == 1)
+                    {   // ORGAN: drawbars. COLOUR pulls out the upper ones.
+                        v = 0.8f * (std::sin (x) + 0.65f * std::sin (2.0f * x)
+                                    + c * (0.5f * std::sin (3.0f * x) + 0.4f * std::sin (4.0f * x) + 0.22f * std::sin (6.0f * x) + 0.18f * std::sin (8.0f * x)));
+                    }
+                    else
+                    {   // GLASS: FM with whole-number ratios (so it stays in tune), shimmering with the breath.
+                        const float index = (0.25f + 1.6f * c) * (0.75f + 0.25f * std::sin (kTwoPi * droneBreathPh[k] * 3.0f));
+                        v = 0.85f * (std::sin (x + index * std::sin (3.0f * x)) + 0.3f * std::sin (2.0f * x));
+                    }
+                }
+            }
+            sum += v * br;
+        }
+        if (type == 4)
+        {   // Vowel formants on the whole choir: COLOUR moves oo > oh > ah > eh, breath sways it.
+            if (droneFormCounter-- <= 0)
+            {
+                droneFormCounter = 32;
+                float fm[3];
+                dw::vowelFormants (c + 0.08f * p.droneBreath * std::sin (kTwoPi * droneBreathPh[0]), fm);
+                for (int k = 0; k < 3; ++k) droneForm[k].set (fm[k], 7.0f, fsr);
+            }
+            float lp;
+            sum = 1.9f * (droneForm[0].process (sum, lp) + 0.55f * droneForm[1].process (sum, lp) + 0.25f * droneForm[2].process (sum, lp)) + 0.06f * sum;
         }
         breathAvg /= 6.0f;
         // Sub: a sine an octave below the root.
@@ -1094,13 +1333,38 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
 
         const bool trig = in (I_GRAIN_TRIG) > 0.5f;
         const float gpos = p.gPos + in (I_GRAIN_POS) * 0.5f;
-        const float gm = grains.process (currentSample.load (std::memory_order_acquire), gpos - std::floor (gpos), p.gSpray,
-                                         p.gSize, p.gDensity, p.gPitch + 12.0f * in (I_GRAIN_PITCH), p.gRev, p.gScan,
+        const auto* sd = currentSample.load (std::memory_order_acquire);
+        float gp = p.gPitch + 12.0f * in (I_GRAIN_PITCH);
+        if (p.grainKey)
+        {
+            // IN KEY: PITCH snaps to octaves (and fifths, when the scale has the notes for it),
+            // and the sound's own pitch is moved onto the current chord root.
+            static const float withFifths[] { -24, -17, -12, -5, 0, 7, 12, 19, 24 };
+            static const float octaves[] { -24, -12, 0, 12, 24, 24, 24, 24, 24 };
+            const bool fifths = p.scale == 0 || p.scale == 1 || p.scale == 4 || p.scale == 6 || p.scale == 7;
+            const float* steps = fifths ? withFifths : octaves;
+            float best = steps[0];
+            for (int k = 1; k < 9; ++k) if (std::abs (steps[k] - gp) < std::abs (best - gp)) best = steps[k];
+            gp = best;
+            if (sd != nullptr && sd->rootMidi > 0.0f)
+            {
+                float d = baseNote - sd->rootMidi;
+                d -= 12.0f * std::round (d / 12.0f);
+                gp += d + chordOffsetNow;
+            }
+        }
+        const float gm = grains.process (sd, gpos - std::floor (gpos), p.gSpray, p.gSize, p.gDensity, gp, p.gRev, p.gScan,
                                          trig && ! grainLastTrig, gl, gr);
         grainLastTrig = trig;
         outs[O_GRAIN] = gm * p.gLevel;
         gl *= p.gLevel; gr *= p.gLevel;
     }
+    // ---- CHORDS layer (stereo, straight to the master bus)
+    float cl = 0.0f, cr = 0.0f;
+    updateChordLayer();
+    chordLayer.process (chordGlideCoef, p.chdWave, p.chdTone, p.chdAttack, p.chdRelease, p.chdWidth, cl, cr);
+    cl *= p.chdLevel * 0.9f; cr *= p.chdLevel * 0.9f;
+
     bool dreamPatched = false, grainPatched = false;
     for (int k = 0; k < NumIns; ++k)
     {
@@ -1117,6 +1381,7 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     float r = s1 * std::sin (a1) + s2 * std::sin (a2);
     if (! dreamPatched) { l += dl; r += dr; }
     if (! grainPatched) { l += gl; r += gr; }
+    l += cl; r += cr;
 
     ensemble.process (l, r, p.ens);
     tape.process (l, r, p.tWow, p.tAge, p.tHiss, p.tCrush);
@@ -1157,22 +1422,11 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 
     updateBlockParams();
 
-    // ---- Chord progression (changes on bar lines)
+    // ---- Chord progression (changes exactly on bar lines, see applyProgression)
     {
-        const double beatNow = hostSynced ? hostPpqAtBlock : beatPos;
-        const int family = (p.scale == 6 || p.scale == 7) ? 1 : 0;
-        if (p.progMode > 0)
-        {
-            const int idx = (int) std::floor (beatNow / (4.0 * p.progBars)) & 3;
-            const auto& c = progTable[p.progMode][family][idx];
-            chordOffsetTarget = c.offset > 6 ? c.offset - 12 : c.offset;   // keep roots close: move down rather than far up
-            p.dreamChord = c.dream;
-            p.droneChord = c.drone;
-            progIndex.store (idx);
-        }
-        else { chordOffsetTarget = 0; progIndex.store (-1); }
         const float glideSec = (0.03f + p.progGlide * p.progGlide * 5.0f) * (p.progMode == 4 ? 2.0f : 1.0f);
         chordGlideCoef = onePoleCoef (glideSec / 4.0f, (float) sr);
+        applyProgression (hostSynced ? hostPpqAtBlock : beatPos);
         progChord.store (p.dreamChord);
         progOffset.store (chordOffsetTarget);
     }
@@ -1282,6 +1536,10 @@ void DriftwerkProcessor::loadPreset (int index)
     for (auto& [id, value] : pr.values)
         if (auto* rp = apvts.getParameter (id))
             target[id] = rp->convertTo0to1 (value);
+    // Your own sound stays loaded in GRAIN when you change presets.
+    if (auto* src = apvts.getParameter ("grain.src"))
+        if ((int) std::lround (apvts.getRawParameterValue ("grain.src")->load()) == myFileSource && userSample != nullptr)
+            target["grain.src"] = src->getValue();
 
     for (auto* param : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (param))
@@ -1296,6 +1554,7 @@ void DriftwerkProcessor::loadPreset (int index)
 
     setPatchFromString (pr.patch != nullptr ? pr.patch : defaultPatch);
     setModFromString (pr.mods != nullptr ? pr.mods : "");
+    if (juce::MessageManager::existsAndIsCurrentThread()) syncGrainSource();
 }
 
 void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -1322,7 +1581,16 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
             setPatchFromString (state.getProperty ("patch", defaultPatch).toString());
             setModFromString (state.getProperty ("mods", {}).toString());
             const juce::String sp = state.getProperty ("sample", {}).toString();
-            if (sp.isNotEmpty() && juce::File (sp).existsAsFile()) loadSample (juce::File (sp));
+            if (sp.isNotEmpty() && juce::File (sp).existsAsFile())
+            {
+                loadSample (juce::File (sp));
+                // Sets saved before GRAIN had a sound menu: they were playing this file.
+                if (! state.getChildWithProperty ("id", "grain.src").isValid())
+                    if (auto* src = apvts.getParameter ("grain.src"))
+                        src->setValueNotifyingHost (src->convertTo0to1 ((float) myFileSource));
+            }
+            if (juce::MessageManager::existsAndIsCurrentThread()) syncGrainSource();
+            else triggerAsyncUpdate();
             currentProgram = state.getProperty ("program", 0);
             const juce::String pn = state.getProperty ("presetName", {}).toString();
             for (int i = 0; i < getNumPresets(); ++i)

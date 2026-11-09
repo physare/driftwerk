@@ -43,6 +43,7 @@ int main (int argc, char** argv)
         for (auto& item : kv)
             if (auto* rp = proc.apvts.getParameter (item.upToFirstOccurrenceOf ("=", false, false)))
                 rp->setValueNotifyingHost (rp->convertTo0to1 (item.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
+        proc.syncGrainSource();   // no message loop runs here, so pick up grain.src directly
     }
     if (auto* env = std::getenv ("DW_HAND"))
     {

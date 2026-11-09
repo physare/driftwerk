@@ -7,8 +7,11 @@
 #include "DSP.h"
 #include "Patch.h"
 #include "CameraTracker.h"
+#include "Sounds.h"
 
-class DriftwerkProcessor : public juce::AudioProcessor
+class DriftwerkProcessor : public juce::AudioProcessor,
+                           private juce::AudioProcessorValueTreeState::Listener,
+                           private juce::AsyncUpdater
 {
 public:
     DriftwerkProcessor();
@@ -74,10 +77,15 @@ public:
     std::atomic<float> grainPlayPos { 0.0f };
     std::atomic<float> outputLevel { 0.0f };
 
-    // User sound for the GRAIN module (message thread).
+    // Sounds for the GRAIN module (message thread). grain.src picks one of the built-in
+    // sounds or MY FILE (the last file you loaded).
+    static constexpr int myFileSource = dw::numBuiltInSounds;
+    static juce::StringArray grainSourceNames();
     bool loadSample (const juce::File& f);
+    void syncGrainSource();                    // makes the sound named by grain.src the one GRAIN plays
     const dw::SampleData* getSampleForDisplay() const { return currentSample.load(); }
-    juce::String getSampleName() const { return samplePath.isEmpty() ? juce::String ("built-in: glass choir") : juce::File (samplePath).getFileName(); }
+    juce::String getSampleName() const;
+    bool hasUserSample() const { return userSample != nullptr; }
 
     // A fresh random scene: key, scale, chords, rates, grain pitch and modulation patch.
     void rollScene();
@@ -110,6 +118,10 @@ public:
     juce::String progressionChordName (int k) const;
     void setRecordNotes (bool on);
 
+    // CHORDS layer: the notes it is playing now (for the editor).
+    std::array<std::atomic<int>, dw::ChordLayer::V> chordNotes;
+    std::atomic<int> chordNoteCount { 0 };
+
     //==========================================================================
     // Record everything Timewind plays to a WAV file (Music/Timewind).
     bool startRecording();
@@ -123,6 +135,20 @@ public:
     std::atomic<int> scopeWrite { 0 };
 
 private:
+    void parameterChanged (const juce::String& id, float) override { if (id == "grain.src") triggerAsyncUpdate(); }
+    void handleAsyncUpdate() override { syncGrainSource(); }
+    std::unique_ptr<dw::SampleData> builtIns[dw::numBuiltInSounds];
+    dw::SampleData* userSample = nullptr;
+
+    // CHORDS layer state
+    dw::ChordLayer chordLayer;
+    int chdLastKey = -1, chdLastMode = -1;
+    long long chdLastBeat = -1;
+    bool chdLastArpGate = false, chdWasOn = false;
+    double curBeat = 0.0;
+    void updateChordLayer();
+    void applyProgression (double beat);
+
     juce::StringArray slots;
     juce::File slotsFile() const;
     void loadSlots();
@@ -139,6 +165,10 @@ private:
 
     // Drone voice shaping state
     float droneBreathPh[6] {}, droneSubPh = 0.0f, droneLp = 0.0f, droneAirLp = 0.0f, droneAirHp = 0.0f;
+    dw::BlepOsc droneOsc2[6];                     // STRINGS: the second saw of each voice
+    float droneVibPh[6] {}, droneHp = 0.0f;
+    dw::Svf droneForm[3];                         // CHOIR: vowel formants
+    int droneFormCounter = 0;
     float arpGlided = 0.0f;
     int chordOffsetTarget = 0;
     float chordOffsetNow = 0.0f, chordGlideCoef = 1.0f;
@@ -222,7 +252,6 @@ private:
     std::atomic<dw::SampleData*> currentSample { nullptr };
     std::vector<std::unique_ptr<dw::SampleData>> sampleStore; // keeps old samples alive (message thread)
     juce::String samplePath;
-    void makeDefaultSample();
     int lastCamTrigForScene = 0;
     double lastSceneTime = 0.0;
     void applyPlayMode();
@@ -239,6 +268,9 @@ private:
         float density = 0.85f, mutate = 0.15f, walk = 0.6f, gateLen = 0.5f;
         bool arpOn = true; int arpFollow = 1; bool hold = false; int arpOct = 0; float glide = 0.0f;
         float droneTone = 1.0f, droneWave = 0.0f, droneBreath = 0.0f, droneAir = 0.0f, droneSub = 0.0f;
+        int droneType = 0; bool grainKey = true;
+        bool chdOn = false; int chdMode = 0, chdVoices = 4, chdOct = 0;
+        float chdLevel = 0.45f, chdWave = 0.3f, chdTone = 0.55f, chdAttack = 0.9f, chdRelease = 2.5f, chdWidth = 0.6f;
         int progMode = 0, progBars = 8; float progGlide = 0.2f;
         int vco1Oct = 0, vco2Oct = 0; float vco1Fine = 0, vco2Fine = 0, vco1Pw = 0.5f, vco2Pw = 0.5f;
         float vco1Pwm = 0.5f, vco2Pwm = 0.5f, vco1Fm = 0.0f, vco2Fm = 0.0f;
