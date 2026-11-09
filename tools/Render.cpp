@@ -91,7 +91,24 @@ int main (int argc, char** argv)
     {
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
         ed->setVisible (true);
-        if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get())) { de->view.advanceSlime (600); de->refreshNow(); }
+        if (auto* env = std::getenv ("DW_HANDIMG"))
+        {
+            // Run the real hand skeleton on a still photo so the views show it.
+            const auto photo = juce::ImageFileFormat::loadFrom (juce::File (juce::String (env)));
+            proc.camera.hand.start();
+            for (int k = 0; k < 8; ++k) { proc.camera.analyse (photo); juce::Thread::sleep (150); }
+            std::printf ("hand %s  pinch %.2f spread %.2f fist %.2f tilt %.2f  %.1f ms  (%s)\n", proc.camera.hand.present.load() ? "found" : "none",
+                         proc.camera.hand.pinch.load(), proc.camera.hand.spread.load(), proc.camera.hand.fist.load(), proc.camera.hand.tilt.load(),
+                         proc.camera.hand.inferenceMs.load(), proc.camera.hand.status.toRawUTF8());
+            juce::AudioBuffer<float> tmp (2, 512); juce::MidiBuffer mb;
+            for (int k = 0; k < 400; ++k) proc.processBlock (tmp, mb);   // let the gesture outputs settle
+        }
+        if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get()))
+        {
+            de->view.advanceSlime (600);
+            if (std::getenv ("DW_FULL")) de->view.showFullCamera();
+            de->refreshNow();
+        }
         ed->setSize (MainView::designW, MainView::designH);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         juce::File png (outDir + "/editor_" + tag + ".png");

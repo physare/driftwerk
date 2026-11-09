@@ -141,6 +141,7 @@ private:
     dw::Ladder vcf1, vcf2;
     // Camera
     float camX = 0, camY = 0, camMot = 0;
+    float camPinch = 0, camSpread = 0, camFist = 0, camTilt = 0;
     int camTrigSeen = 0, camTrigLeft = 0;
     struct CameraPoller : juce::Timer
     {

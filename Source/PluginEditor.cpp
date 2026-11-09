@@ -304,6 +304,31 @@ void ScopeComponent::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+// The 21-joint hand skeleton, mirrored to match the picture: glowing acid bones, white fingertips.
+static void drawSkeleton (juce::Graphics& g, const HandTracker::Pose& pose, juce::Rectangle<float> r, float scale)
+{
+    if (! pose.present) return;
+    static const int bones[][2] { { 0, 1 }, { 1, 2 }, { 2, 3 }, { 3, 4 }, { 0, 5 }, { 5, 6 }, { 6, 7 }, { 7, 8 },
+                                  { 5, 9 }, { 9, 10 }, { 10, 11 }, { 11, 12 }, { 9, 13 }, { 13, 14 }, { 14, 15 }, { 15, 16 },
+                                  { 13, 17 }, { 0, 17 }, { 17, 18 }, { 18, 19 }, { 19, 20 } };
+    auto at = [&] (int j) { const auto p = pose.pts[(size_t) j];
+                            return juce::Point<float> (r.getRight() - p.x * r.getWidth(), r.getY() + p.y * r.getHeight()); };
+    juce::Path path;
+    for (auto& b : bones) { path.startNewSubPath (at (b[0])); path.lineTo (at (b[1])); }
+    g.setColour (dwui::acid.withAlpha (0.22f));
+    g.strokePath (path, juce::PathStrokeType (6.0f * scale, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    g.setColour (dwui::acid);
+    g.strokePath (path, juce::PathStrokeType (1.6f * scale, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    for (int j = 0; j < HandTracker::NumJoints; ++j)
+    {
+        const auto c = at (j);
+        const bool tip = j == 4 || j == 8 || j == 12 || j == 16 || j == 20;
+        const float rad = (tip ? 4.5f : 2.6f) * scale;
+        g.setColour (tip ? dwui::fg : dwui::acid);
+        g.fillEllipse (c.x - rad, c.y - rad, rad * 2, rad * 2);
+    }
+}
+
 void CameraView::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
@@ -320,6 +345,7 @@ void CameraView::paint (juce::Graphics& g)
         g.setOpacity (0.85f);
         g.drawImage (img, screen);
         g.setOpacity (1.0f);
+        drawSkeleton (g, proc.camera.hand.getPose(), screen, 0.6f);
         const float hx = proc.monitor[O_CAM_X].load(), hy = proc.monitor[O_CAM_Y].load();
         const float px = screen.getCentreX() + hx * screen.getWidth() * 0.5f;
         const float py = screen.getCentreY() - hy * screen.getHeight() * 0.5f;
@@ -478,7 +504,7 @@ FullCameraView::FullCameraView (DriftwerkProcessor& p, SlimeView& s) : proc (p),
 void FullCameraView::resized()
 {
     const int panelX = getWidth() - 300;
-    stage = juce::Rectangle<float> (24.0f, 70.0f, (float) panelX - 48.0f, (float) getHeight() - 110.0f);
+    stage = juce::Rectangle<float> (24.0f, 70.0f, (float) panelX - 48.0f, (float) getHeight() - 150.0f);
     closeButton.setBounds (getWidth() - 200, 18, 180, 30);
     // Two toggles, then knobs in a 2-column grid, then the scene button.
     int y = 90;
@@ -580,6 +606,7 @@ void FullCameraView::paint (juce::Graphics& g)
         g.setColour (acid);
         g.drawEllipse (hx - 14, hy - 14, 28, 28, 2.0f);
     }
+    if (frame.isValid()) drawSkeleton (g, proc.camera.hand.getPose(), pic, 1.6f);
 
     // Readouts
     g.setColour (fg2);
@@ -587,6 +614,27 @@ void FullCameraView::paint (juce::Graphics& g)
     g.drawText (juce::String::formatted ("hand x %+.2f    hand y %+.2f    motion %.2f",
                  proc.monitor[O_CAM_X].load(), proc.monitor[O_CAM_Y].load(), proc.monitor[O_CAM_MOTION].load()),
                 (int) pic.getX(), (int) pic.getBottom() + 8, (int) pic.getWidth(), 20, juce::Justification::left);
+    {
+        // Finger gestures from the hand skeleton
+        const auto& ht = proc.camera.hand;
+        const float vals[] { proc.monitor[O_CAM_PINCH].load(), proc.monitor[O_CAM_SPREAD].load(),
+                             proc.monitor[O_CAM_FIST].load(), proc.monitor[O_CAM_TILT].load() * 0.5f + 0.5f };
+        const char* names[] { "PINCH", "SPREAD", "FIST", "TILT" };
+        const float bw = 110.0f, y = pic.getBottom() + 34.0f;
+        for (int k = 0; k < 4; ++k)
+        {
+            const float x = pic.getX() + (float) k * (bw + 24.0f);
+            g.setColour (fg3); g.setFont (dwui::mono (11.0f));
+            g.drawText (names[k], (int) x, (int) y, (int) bw, 14, juce::Justification::left);
+            g.setColour (rule); g.fillRect (x, y + 17.0f, bw, 3.0f);
+            g.setColour (acid); g.fillRect (x, y + 17.0f, bw * juce::jlimit (0.0f, 1.0f, vals[k]), 3.0f);
+        }
+        g.setColour (fg3); g.setFont (dwui::mono (11.0f));
+        const juce::String hs = ! ht.isReady() ? ht.status.toLowerCase()
+                              : ht.present.load() ? juce::String::formatted ("hand skeleton: tracking  %.0f ms", ht.inferenceMs.load())
+                                                  : juce::String ("hand skeleton: show your hand");
+        g.drawText (hs, (int) (pic.getX() + 4 * (bw + 24.0f)), (int) y, 300, 22, juce::Justification::left);
+    }
 
     // Side panel
     const int panelX = getWidth() - 300;

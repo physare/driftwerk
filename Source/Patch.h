@@ -25,6 +25,7 @@ enum Out
     O_VCA1, O_VCA2,
     O_CAM_X, O_CAM_Y, O_CAM_MOTION, O_CAM_TRIG,
     O_DREAM, O_GRAIN,
+    O_CAM_PINCH, O_CAM_SPREAD, O_CAM_FIST, O_CAM_TILT,
     NumOuts
 };
 
@@ -64,6 +65,8 @@ inline const JackDef outDefs[NumOuts] = {
     { "cam.x",     "HAND X", M_CAMERA }, { "cam.y",  "HAND Y", M_CAMERA },
     { "cam.mot",   "MOTION", M_CAMERA }, { "cam.trig", "TRIG", M_CAMERA },
     { "dream.out", "OUT",   M_DREAM },  { "grain.out", "OUT",  M_GRAIN },
+    { "cam.pinch", "PINCH", M_CAMERA }, { "cam.spread", "SPREAD", M_CAMERA },
+    { "cam.fist",  "FIST",  M_CAMERA }, { "cam.tilt",   "TILT",   M_CAMERA },
 };
 
 inline const JackDef inDefs[NumIns] = {

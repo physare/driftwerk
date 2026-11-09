@@ -176,6 +176,7 @@ public:
     juce::Colour cableColour (int out, int in) const;
 
     void refreshNow() { timerCallback(); } // used by the offline render tool
+    void showFullCamera() { openFullCamera (true); } // used by the offline render tool
     void advanceSlime (int steps) { for (int i = 0; i < steps; ++i) slime->advance(); }
 
     DriftwerkProcessor& proc;

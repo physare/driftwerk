@@ -22,6 +22,16 @@ jobs:
           New-Item -ItemType Directory -Force dist | Out-Null
           Copy-Item -Recurse build/Timewind_artefacts/Release/VST3/Timewind.vst3 dist/
           Copy-Item build/Timewind_artefacts/Release/Standalone/Timewind.exe dist/
+          # Hand skeleton: ONNX Runtime (renamed so it never clashes with another copy in the host) + models,
+          # inside the VST3 bundle's Resources and next to the standalone app.
+          Invoke-WebRequest -Uri https://github.com/microsoft/onnxruntime/releases/download/v1.20.1/onnxruntime-win-x64-1.20.1.zip -OutFile ort.zip
+          Expand-Archive ort.zip ort -Force
+          $res = 'dist/Timewind.vst3/Contents/Resources'
+          New-Item -ItemType Directory -Force $res | Out-Null
+          foreach ($d in @($res, 'dist')) {
+            Copy-Item ort/onnxruntime-win-x64-1.20.1/lib/onnxruntime.dll (Join-Path $d 'tw_onnxruntime.dll')
+            Copy-Item models/*.onnx $d
+          }
           Copy-Item tools/windows/update-timewind.ps1 dist/
           Copy-Item tools/windows/install-timewind.ps1 dist/
           Set-Content -NoNewline -Path version.txt -Value "$env:GITHUB_SHA"

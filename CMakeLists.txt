@@ -63,4 +63,9 @@ if(DRIFTWERK_BUILD_TOOLS)
     target_compile_definitions(DriftwerkRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_CAMERA=0)
     target_link_libraries(DriftwerkRender PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_video juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags)
+
+    juce_add_console_app(TimewindHandTest PRODUCT_NAME "TimewindHandTest")
+    target_sources(TimewindHandTest PRIVATE tools/HandTest.cpp)
+    target_compile_definitions(TimewindHandTest PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0)
+    target_link_libraries(TimewindHandTest PRIVATE juce::juce_gui_basics PUBLIC juce::juce_recommended_config_flags)
 endif()

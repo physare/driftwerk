@@ -48,6 +48,25 @@ Turn on HAND > CAM and HAND PLAY > PLAY. Then:
 
 DEPTH sets how much the hand overrides the knobs. The slime mold at the top grows toward your hand and pulses with the sound.
 
+### Hand skeleton
+
+On Windows the camera also runs a 21-joint hand skeleton (MediaPipe's hand models in ONNX Runtime, about 11 ms per frame).
+You see the bones drawn over your hand in the HAND preview and the full-screen camera, and four more jacks appear:
+
+* **PINCH**: thumb and index fingertips touching (0..1). Closing a pinch also fires TRIG.
+* **SPREAD**: fingers fanned open (0..1).
+* **FIST**: fingers curled (0..1).
+* **TILT**: hand leaning left or right (-1..+1).
+
+In Hand Play, pinch adds shimmer and grains, spreading opens up the space, a fist hushes the arp and darkens, and tilt scans the grains.
+They are also mod sources: right-click any knob.
+
+## Random Arp
+
+* **ON** turns the plucks on and off. The pads and drone keep going.
+* **HARMONY** chooses which notes it can play. **PADS** (the default) uses only the notes of the Dream chord, so it always fits the pads. **SCALE** plays the whole SCALE. **ROOTS** plays only the root and fifth.
+* DENSITY sets how many steps play, MUTATE how often notes change, WALK how far they jump, and GATE how long each pluck lasts.
+
 ## Playing knobs with your hands
 
 Right-click any knob and pick Hand X, Hand Y or Hand motion (or an LFO, S&H, ENV 2 or the arp's random output),

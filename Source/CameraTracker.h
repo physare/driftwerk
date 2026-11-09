@@ -7,6 +7,7 @@
  #include <juce_video/juce_video.h>
 #endif
 #include <atomic>
+#include "HandTracker.h"
 #include <cmath>
 
 class CameraTracker
@@ -33,6 +34,7 @@ public:
     {
        #if JUCE_USE_CAMERA
         if (device != nullptr) return true;
+        hand.start(); // loads the hand skeleton models once; falls back to motion only if missing
         const auto names = juce::CameraDevice::getAvailableDevices();
         status = names.isEmpty() ? "NO CAMERA FOUND" : "STARTING";
         if (names.isEmpty()) return false;
@@ -77,6 +79,7 @@ public:
     std::atomic<int> triggerCount { 0 };
     std::atomic<float> sensitivity { 0.5f };
     juce::String status { "CAMERA OFF" };
+    HandTracker hand;
 
     // Larger colour frame for the full-screen view (not mirrored).
     juce::Image getColourFrame()
@@ -133,6 +136,15 @@ public:
         if (! armed && amount < 0.08f) armed = true;
         if (armed && amount > 0.25f) { armed = false; triggerCount.fetch_add (1); }
 
+        // With the hand skeleton running, HAND X/Y follow the palm itself, and a pinch also triggers.
+        if (hand.present.load())
+        {
+            handX.store (1.0f - 2.0f * hand.palmX.load());
+            handY.store (1.0f - 2.0f * hand.palmY.load());
+        }
+        const int pc = hand.pinchCount.load();
+        if (pc != pinchSeen) { pinchSeen = pc; triggerCount.fetch_add (1); }
+
         // Preview: mirrored grayscale with moving pixels tinted amber.
         juce::Image img (juce::Image::RGB, W, H, false);
         {
@@ -146,6 +158,7 @@ public:
                 }
         }
         auto big = frame.rescaled (juce::jmin (480, frame.getWidth()), juce::jmin (360, frame.getHeight()), juce::Graphics::lowResamplingQuality);
+        hand.submit (big);
         const juce::SpinLock::ScopedLockType sl (previewLock);
         preview = img;
         colour = big;
@@ -158,6 +171,7 @@ private:
    #endif
     float prev[W * H] {};
     bool hasPrev = false, armed = true;
+    int pinchSeen = 0;
     juce::SpinLock previewLock;
     juce::Image preview, colour;
 };

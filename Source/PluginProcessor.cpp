@@ -635,6 +635,12 @@ void DriftwerkProcessor::applyPlayMode()
     nudge ("arp.density", 0.45f * m); nudge ("arp.mutate", 0.5f * m);
     nudge ("grain.density", 0.45f * m); nudge ("grain.spray", 0.5f * m);
     nudge ("echo.fb", 0.2f * m); nudge ("tape.wow", 0.25f * m);
+    // Hand skeleton: pinch sparkles (shimmer, glassy grains), an open spread widens the space,
+    // a fist hushes the sequence and darkens, tilting bends the grains.
+    nudge ("hall.shimmer", 0.5f * camPinch); nudge ("grain.density", 0.35f * camPinch);
+    nudge ("hall.size", 0.2f * camSpread);   nudge ("out.ens", 0.3f * camSpread); nudge ("dream.level", 0.15f * camSpread);
+    nudge ("arp.density", -0.6f * camFist);  nudge ("vcf1.cut", -0.25f * camFist); nudge ("echo.mix", 0.2f * camFist);
+    nudge ("grain.scan", 0.3f * camTilt);
 }
 
 void DriftwerkProcessor::updateBlockParams()
@@ -842,6 +848,16 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
         outs[O_CAM_Y] = camY;
         outs[O_CAM_MOTION] = camMot;
         outs[O_CAM_TRIG] = camTrigLeft > 0 ? 1.0f : 0.0f;
+        // Hand skeleton gestures (hold their last shape when the hand leaves, except pinch).
+        const bool hp = camera.hand.present.load (std::memory_order_relaxed);
+        camPinch  += ((hp ? camera.hand.pinch.load (std::memory_order_relaxed) : 0.0f) - camPinch) * coef;
+        camSpread += (camera.hand.spread.load (std::memory_order_relaxed) - camSpread) * coef;
+        camFist   += (camera.hand.fist.load (std::memory_order_relaxed) - camFist) * coef;
+        camTilt   += (camera.hand.tilt.load (std::memory_order_relaxed) - camTilt) * coef;
+        outs[O_CAM_PINCH] = camPinch;
+        outs[O_CAM_SPREAD] = camSpread;
+        outs[O_CAM_FIST] = camFist;
+        outs[O_CAM_TILT] = camTilt;
     }
 
     // ---- DREAM + GRAIN (stereo, normalled straight to the master bus unless their OUT is patched)
