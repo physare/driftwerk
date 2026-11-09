@@ -349,6 +349,7 @@ struct HallReverb
             diff[i].prepare ((int) diffLens[i] + 8);
         }
         for (auto& p : predelay) p.prepare ((int) (sr * 0.1f));
+        shimLine.prepare ((int) (sr * 0.2f));
     }
 
     static float allpass (DelayLine& d, float len, float x, float g = 0.62f)
@@ -359,8 +360,14 @@ struct HallReverb
         return delayed - g * v;
     }
 
-    void process (float& l, float& r, float size, float damping, float mix)
+    // Octave-up pitch shifter (two crossfaded taps) used to feed the shimmer.
+    DelayLine shimLine;
+    double shimPh = 0.0;
+    float lastWet = 0.0f, shimLp = 0.0f;
+
+    void process (float& l, float& r, float size, float damping, float mix, float shimmer = 0.0f)
     {
+        if (shimLine.buf.empty()) shimLine.prepare ((int) (sr * 0.2f));
         const float scale = 0.55f + size * 1.0f;
         const float rt60 = 1.2f + size * size * 38.0f; // up to ~40 s tail
         for (int i = 0; i < N; ++i)
@@ -368,6 +375,21 @@ struct HallReverb
 
         predelay[0].push (l); predelay[1].push (r);
         float in = 0.5f * (predelay[0].read (0.025f * sr) + predelay[1].read (0.031f * sr));
+
+        if (shimmer > 0.0f)
+        {
+            shimLine.push (lastWet);
+            const float window = 0.09f * sr;
+            shimPh += 1.0 / window; if (shimPh >= 1.0) shimPh -= 1.0;
+            const float p1 = (float) shimPh, p2 = (float) std::fmod (shimPh + 0.5, 1.0);
+            const float a = shimLine.read (4.0f + window * (1.0f - p1));
+            const float b = shimLine.read (4.0f + window * (1.0f - p2));
+            const float g1 = std::sin (kPi * p1), g2 = std::sin (kPi * p2);
+            const float up = a * g1 + b * g2;
+            shimLp += (up - shimLp) * 0.35f;
+            in += softClip (shimLp * shimmer * 0.9f);
+        }
+
         for (int i = 0; i < 4; ++i)
             in = allpass (diff[i], diffLens[i], in);
 
@@ -403,8 +425,243 @@ struct HallReverb
 
         const float wl = (o[0] + o[2] + o[4] + o[6]) * 0.45f;
         const float wr = (o[1] + o[3] + o[5] + o[7]) * 0.45f;
+        lastWet = 0.5f * (wl + wr);
         l = l * (1.0f - mix * 0.5f) + wl * mix;
         r = r * (1.0f - mix * 0.5f) + wr * mix;
+    }
+};
+
+//==============================================================================
+// Tape machine: wow/flutter, saturation, ageing (losing top end), hiss and bit crush.
+struct TapeFX
+{
+    DelayLine dl[2];
+    float sr = 44100.0f;
+    double wowPh = 0.0, flutPh = 0.0;
+    float drift = 0.0f, driftT = 0.0f; int driftCount = 0;
+    float lp[2] {}, lp2[2] {}, hissLp = 0.0f;
+    float held[2] {}; float holdCount = 0.0f;
+    Random rng { 0x7A9E5EEDu };
+
+    void prepare (float sampleRate)
+    {
+        sr = sampleRate;
+        for (auto& d : dl) d.prepare ((int) (sr * 0.06f));
+    }
+
+    void process (float& l, float& r, float wow, float age, float hiss, float crush)
+    {
+        // Wow (slow), flutter (fast) and a wandering speed drift, as in a worn cassette.
+        wowPh += (0.45 + drift * 0.15) / sr; if (wowPh >= 1.0) wowPh -= 1.0;
+        flutPh += 6.5 / sr;                  if (flutPh >= 1.0) flutPh -= 1.0;
+        if (++driftCount >= 2048) { driftCount = 0; if (rng.next() > 0.7f) driftT = rng.next(); }
+        drift += (driftT - drift) * 0.00002f;
+        const float mod = wow * (std::sin (kTwoPi * (float) wowPh) * 0.0035f + drift * 0.0025f)
+                        + wow * 0.0004f * std::sin (kTwoPi * (float) flutPh);
+        const float d = (0.008f + mod) * sr;
+        dl[0].push (l); dl[1].push (r);
+        float x[2] { dl[0].read (d), dl[1].read (d) };
+
+        // Age: saturation and a closing low-pass
+        const float cutoff = 18000.0f * std::exp2 (-age * 2.6f);
+        const float c = 1.0f - std::exp (-kTwoPi * cutoff / sr);
+        for (int k = 0; k < 2; ++k)
+        {
+            float v = softClip (x[k] * (1.0f + age * 1.8f)) / (1.0f + age * 0.5f);
+            lp[k] += (v - lp[k]) * c;
+            lp2[k] += (lp[k] - lp2[k]) * c;
+            x[k] = lp2[k];
+        }
+
+        // Hiss
+        if (hiss > 0.0f)
+        {
+            const float n = rng.next();
+            hissLp += (n - hissLp) * 0.6f;
+            x[0] += (n - hissLp * 0.5f) * hiss * 0.012f;
+            x[1] += (rng.next() - hissLp * 0.5f) * hiss * 0.012f;
+        }
+
+        // Crush: sample-rate reduction and fewer bits
+        if (crush > 0.001f)
+        {
+            const float factor = 1.0f + crush * crush * 14.0f;
+            holdCount += 1.0f;
+            if (holdCount >= factor) { holdCount -= factor; held[0] = x[0]; held[1] = x[1]; }
+            const float levels = std::exp2 (16.0f - crush * 10.5f);
+            for (int k = 0; k < 2; ++k)
+                x[k] = std::round (held[k] * levels) / levels;
+        }
+        l = x[0]; r = x[1];
+    }
+};
+
+//==============================================================================
+// Eno-style loop bank: five soft voices whose cycles have unrelated lengths,
+// so their notes drift in and out of phase and never repeat the same way twice.
+struct DreamBank
+{
+    static constexpr int V = 5;
+    struct Voice
+    {
+        double phase = 0.0, mphase = 0.0, cycle = 0.0;
+        float env = 0.0f, envTarget = 0.0f;
+        float wobPh = 0.0f, drift = 0.0f, driftT = 0.0f;
+        float pan = 0.0f;
+        int noteIdx = 0;
+    } v[V];
+    float sr = 44100.0f;
+    Random rng { 0xD8EA3B11u };
+    const float lengths[V] { 17.3f, 21.1f, 23.9f, 29.5f, 31.7f };
+    const float offsets[V] { 0.0f, 0.37f, 0.71f, 0.19f, 0.55f };
+
+    void prepare (float sampleRate)
+    {
+        sr = sampleRate;
+        for (int i = 0; i < V; ++i)
+        {
+            v[i].cycle = offsets[i];
+            v[i].pan = -0.8f + 0.4f * (float) i;
+            v[i].wobPh = (float) i * 0.21f;
+            v[i].noteIdx = i;
+        }
+    }
+
+    // chord: semitone offsets (up to 6). Returns mono, adds stereo to l/r.
+    float process (const int* chord, int chordSize, float baseNote, float rate, float tone, float warp,
+                   float& l, float& r)
+    {
+        float mono = 0.0f;
+        for (int i = 0; i < V; ++i)
+        {
+            auto& vo = v[i];
+            vo.cycle += rate / (lengths[i] * sr);
+            if (vo.cycle >= 1.0)
+            {
+                vo.cycle -= 1.0;
+                // Occasionally the loop picks a neighbouring chord tone, like a tape loop re-spliced.
+                if (rng.next() > 0.55f) vo.noteIdx = (vo.noteIdx + (rng.next() > 0.0f ? 1 : chordSize - 1)) % juce_max (1, chordSize);
+            }
+            // Note sounds in the first ~40% of the cycle: slow swell, long fade.
+            const float c = (float) vo.cycle;
+            vo.envTarget = c < 0.08f ? 1.0f : (c < 0.42f ? 0.7f : 0.0f);
+            const float coef = vo.envTarget > vo.env ? 1.0f / (sr * 1.6f) : 1.0f / (sr * 3.5f);
+            vo.env += (vo.envTarget - vo.env) * coef * 4.0f;
+            if (vo.env < 1.0e-4f && vo.envTarget == 0.0f) { vo.env = 0.0f; continue; }
+
+            // Warp: slow per-voice pitch wobble and drift (warped-cassette detune).
+            vo.wobPh += (0.23f + 0.11f * (float) i) / sr; if (vo.wobPh >= 1.0f) vo.wobPh -= 1.0f;
+            if (rng.next() > 0.9995f) vo.driftT = rng.next();
+            vo.drift += (vo.driftT - vo.drift) * 0.00003f;
+            const float cents = warp * (std::sin (kTwoPi * vo.wobPh) * 22.0f + vo.drift * 30.0f);
+
+            const int octave = i == 2 ? 24 : (i % 2 == 0 ? 12 : 0);
+            const float note = baseNote + (float) chord[vo.noteIdx % juce_max (1, chordSize)] + (float) octave + cents * 0.01f;
+            const double f = 440.0 * std::exp2 ((note - 69.0) / 12.0);
+            vo.phase += f / sr; if (vo.phase >= 1.0) vo.phase -= 1.0;
+            vo.mphase += 2.0 * f / sr; if (vo.mphase >= 1.0) vo.mphase -= 1.0;
+
+            // Soft FM: sine carrier with a gentle 2:1 modulator for a glassy electric-piano / pad tone.
+            const float m = std::sin (kTwoPi * (float) vo.mphase) * (0.15f + tone * 1.6f) * vo.env;
+            const float s = std::sin (kTwoPi * (float) vo.phase + m);
+            const float out = s * vo.env * 0.16f;
+            mono += out;
+            l += out * (1.0f - vo.pan) * 0.5f;
+            r += out * (1.0f + vo.pan) * 0.5f;
+        }
+        return mono;
+    }
+
+    static int juce_max (int a, int b) { return a > b ? a : b; }
+};
+
+//==============================================================================
+// Granular player for a user sound: grains read from any position, at any pitch,
+// forwards or backwards, scattered in time and stereo.
+struct SampleData
+{
+    std::vector<float> left, right;
+    double sampleRate = 44100.0;
+    int length() const { return (int) left.size(); }
+};
+
+struct GrainCloud
+{
+    static constexpr int G = 48;
+    struct Grain { bool on = false; double pos = 0, inc = 1; int age = 0, len = 1; float pan = 0; };
+    Grain grains[G];
+    float sr = 44100.0f;
+    double scanPos = 0.0;
+    double untilNext = 0.0;
+    Random rng { 0x6A41E5EDu };
+    float lastPlayPos = 0.0f; // 0..1, for the UI
+
+    void prepare (float sampleRate) { sr = sampleRate; }
+
+    void spawn (const SampleData& sd, float pos, float spray, float sizeSec, float pitchSemis, float reverseProb)
+    {
+        for (auto& g : grains)
+            if (! g.on)
+            {
+                const int n = sd.length();
+                const float p = clampf (pos + spray * 0.5f * rng.next(), 0.0f, 1.0f);
+                g.len = std::max (16, (int) (sizeSec * sr * (1.0f + 0.25f * spray * rng.next())));
+                const double ratio = std::exp2 ((pitchSemis + spray * 0.3f * rng.next()) / 12.0) * sd.sampleRate / sr;
+                const bool rev = (rng.next() * 0.5f + 0.5f) < reverseProb;
+                g.inc = rev ? -ratio : ratio;
+                g.pos = p * (double) (n - 1);
+                g.age = 0;
+                g.pan = rng.next() * (0.3f + spray * 0.7f);
+                g.on = true;
+                lastPlayPos = p;
+                return;
+            }
+    }
+
+    // Returns mono, adds stereo into l/r.
+    float process (const SampleData* sd, float pos, float spray, float sizeSec, float density,
+                   float pitchSemis, float reverseProb, float scan, bool trig, float& l, float& r)
+    {
+        if (sd == nullptr || sd->length() < 64) return 0.0f;
+        const int n = sd->length();
+
+        scanPos += scan * 0.05 / sr; // scan: slowly travel through the file (+/- 0.05 of it per second at full)
+        scanPos -= std::floor (scanPos);
+        float position = pos + (float) scanPos;
+        position -= std::floor (position);
+
+        untilNext -= 1.0;
+        if (untilNext <= 0.0 || trig)
+        {
+            spawn (*sd, position, spray, sizeSec, pitchSemis, reverseProb);
+            const double interval = sr / std::max (0.5f, density);
+            untilNext = interval * (1.0 + 0.6 * spray * rng.next());
+        }
+
+        float ol = 0.0f, orr = 0.0f;
+        for (auto& g : grains)
+        {
+            if (! g.on) continue;
+            const float t = (float) g.age / (float) g.len;
+            const float w = std::sin (kPi * t);           // smooth grain window
+            const float env = w * w;
+            double p = g.pos;
+            while (p < 0) p += n;
+            while (p >= n - 1) p -= (n - 1);
+            const int i0 = (int) p;
+            const float fr = (float) (p - i0);
+            const float sl = sd->left[(size_t) i0] + (sd->left[(size_t) i0 + 1] - sd->left[(size_t) i0]) * fr;
+            const float sr_ = sd->right[(size_t) i0] + (sd->right[(size_t) i0 + 1] - sd->right[(size_t) i0]) * fr;
+            ol += sl * env * (1.0f - g.pan) * 0.5f;
+            orr += sr_ * env * (1.0f + g.pan) * 0.5f;
+            g.pos += g.inc;
+            if (++g.age >= g.len) g.on = false;
+        }
+        // Normalise so density doesn't explode the level.
+        const float norm = 1.0f / std::sqrt (1.0f + density * sizeSec);
+        ol *= norm; orr *= norm;
+        l += ol; r += orr;
+        return 0.5f * (ol + orr);
     }
 };
 

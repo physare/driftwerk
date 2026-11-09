@@ -6,7 +6,7 @@ namespace dw
 enum Module
 {
     M_CLOCK, M_ARP, M_VCO1, M_VCO2, M_DRONE, M_NOISE, M_LFO1, M_LFO2,
-    M_ENV1, M_ENV2, M_MIX, M_VCF1, M_VCF2, M_VCA1, M_VCA2, M_MASTER, M_CAMERA,
+    M_ENV1, M_ENV2, M_MIX, M_VCF1, M_VCF2, M_VCA1, M_VCA2, M_MASTER, M_CAMERA, M_DREAM, M_GRAIN,
     NumModules
 };
 
@@ -24,6 +24,7 @@ enum Out
     O_VCF1, O_VCF2,
     O_VCA1, O_VCA2,
     O_CAM_X, O_CAM_Y, O_CAM_MOTION, O_CAM_TRIG,
+    O_DREAM, O_GRAIN,
     NumOuts
 };
 
@@ -42,6 +43,7 @@ enum In
     I_VCA1_IN, I_VCA1_CV,
     I_VCA2_IN, I_VCA2_CV,
     I_OUT1, I_OUT2,
+    I_GRAIN_POS, I_GRAIN_PITCH, I_GRAIN_TRIG,
     NumIns
 };
 
@@ -61,6 +63,7 @@ inline const JackDef outDefs[NumOuts] = {
     { "vca1.out",  "OUT",   M_VCA1 },  { "vca2.out", "OUT",   M_VCA2 },
     { "cam.x",     "HAND X", M_CAMERA }, { "cam.y",  "HAND Y", M_CAMERA },
     { "cam.mot",   "MOTION", M_CAMERA }, { "cam.trig", "TRIG", M_CAMERA },
+    { "dream.out", "OUT",   M_DREAM },  { "grain.out", "OUT",  M_GRAIN },
 };
 
 inline const JackDef inDefs[NumIns] = {
@@ -77,6 +80,7 @@ inline const JackDef inDefs[NumIns] = {
     { "vca1.in",   "IN",    M_VCA1 },  { "vca1.cv",   "CV",    M_VCA1 },
     { "vca2.in",   "IN",    M_VCA2 },  { "vca2.cv",   "CV",    M_VCA2 },
     { "out.in1",   "IN1",   M_MASTER },{ "out.in2",   "IN2",   M_MASTER },
+    { "grain.pos", "POS",   M_GRAIN },  { "grain.pitch", "PITCH", M_GRAIN }, { "grain.trig", "TRIG", M_GRAIN },
 };
 
 // The out-of-the-box patch: a self-running random sequence through VCF1/VCA1,

@@ -42,6 +42,7 @@ target_compile_definitions(Driftwerk PUBLIC
     JUCE_USE_CURL=0
     JUCE_VST3_CAN_REPLACE_VST2=0
     JUCE_DISPLAY_SPLASH_SCREEN=0
+    JUCE_USE_MP3AUDIOFORMAT=1
     JUCE_USE_CAMERA=$<IF:$<PLATFORM_ID:Linux>,0,1>)
 
 target_link_libraries(Driftwerk

@@ -37,6 +37,18 @@ int main (int argc, char** argv)
         }
     }
     proc.setCurrentProgram (program);
+    if (auto* env = std::getenv ("DW_SET"))
+    {
+        juce::StringArray kv; kv.addTokens (env, ",", "");
+        for (auto& item : kv)
+            if (auto* rp = proc.apvts.getParameter (item.upToFirstOccurrenceOf ("=", false, false)))
+                rp->setValueNotifyingHost (rp->convertTo0to1 (item.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
+    }
+    if (auto* env = std::getenv ("DW_HAND"))
+    {
+        juce::StringArray v; v.addTokens (env, ",", "");
+        proc.camera.handX.store (v[0].getFloatValue()); proc.camera.handY.store (v[1].getFloatValue()); proc.camera.motion.store (v[2].getFloatValue());
+    }
     const double sr = 48000.0;
     const int block = 512;
     proc.setPlayConfigDetails (0, 2, sr, block);
@@ -64,7 +76,8 @@ int main (int argc, char** argv)
     rms = std::sqrt (rms / (2.0 * all.getNumSamples()));
     std::printf ("program %d peak %.3f rms %.4f\n", program, peak, rms);
 
-    juce::File wav (outDir + "/render_" + juce::String (program) + ".wav");
+    const juce::String tag = std::getenv ("DW_TAG") ? juce::String (std::getenv ("DW_TAG")) : juce::String (program);
+    juce::File wav (outDir + "/render_" + tag + ".wav");
     wav.deleteFile();
     juce::WavAudioFormat fmt;
     if (auto os = wav.createOutputStream())
@@ -78,9 +91,10 @@ int main (int argc, char** argv)
     {
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
         ed->setVisible (true);
-        if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get())) de->refreshNow();
+        if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get())) { de->view.advanceSlime (600); de->refreshNow(); }
+        ed->setSize (MainView::designW, MainView::designH);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
-        juce::File png (outDir + "/editor_" + juce::String (program) + ".png");
+        juce::File png (outDir + "/editor_" + tag + ".png");
         png.deleteFile();
         juce::PNGImageFormat pf;
         if (auto os = png.createOutputStream()) pf.writeImageToStream (img, *os);

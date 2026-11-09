@@ -29,6 +29,25 @@ The interface is a 90s-style modular rack with real drag-and-drop patch cables.
 * The patch is saved with your Ableton set and with presets.
 * MIDI notes transpose the whole system (C3 = no transpose), but it plays on its own without any MIDI.
 
+## Ambient engine (new)
+
+* **DREAM**: five soft voices on loops of unrelated lengths (17 to 32 seconds), so they drift in and out of phase, Eno style. WARP adds warped-cassette detune.
+* **GRAIN**: drop any sound file (wav, aiff, flac, ogg, mp3) onto the waveform, or click LOAD SOUND. POSITION, SPRAY, SIZE, DENSITY, PITCH, REVERSE and SCAN pull it apart. It starts with a built-in glass choir.
+* **TAPE**: wow, age, hiss and crush on the whole mix, for that worn Boards-of-Canada warmth.
+* **HALL SHIMMER**: an octave-up cloud feeding back into the reverb.
+* DREAM and GRAIN play straight into the output until you patch their OUT jacks somewhere else.
+
+## Hand Play
+
+Turn on HAND > CAM and HAND PLAY > PLAY. Then:
+
+* Hand left to right moves between three worlds: **airport** (calm loops and shimmer), **tape** (warped cassette and grains) and **cosmic** (the sequencer and drone).
+* Hand height makes it darker or brighter and drier or wetter.
+* Moving more makes it denser and more chaotic.
+* A quick wave rolls a **new scene**: a random key, scale, chords, rates, grain pitch and patch. The NEW SCENE button does the same.
+
+DEPTH sets how much the hand overrides the knobs. The slime mold at the top grows toward your hand and pulses with the sound.
+
 ## Playing knobs with your hands
 
 Right-click any knob and pick Hand X, Hand Y or Hand motion (or an LFO, S&H, ENV 2 or the arp's random output),
@@ -39,7 +58,7 @@ system up and down. Hand control needs CAM ON in the camera module. Assignments 
 
 ## Presets
 
-Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine, Hand Weather (camera: hand height sweeps the sequence filter, left/right sweeps the drone, a quick wave opens it up).
+Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine, Hand Garden (camera play), Airport Tapes, Warped Cassette, Hand Weather (camera: hand height sweeps the sequence filter, left/right sweeps the drone, a quick wave opens it up).
 
 ## Building
 

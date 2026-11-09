@@ -62,6 +62,18 @@ public:
     std::atomic<int> arpStep { 0 };
     std::atomic<int> arpLength { 16 };
     CameraTracker camera;
+    std::atomic<float> grainPlayPos { 0.0f };
+    std::atomic<float> outputLevel { 0.0f };
+
+    // User sound for the GRAIN module (message thread).
+    bool loadSample (const juce::File& f);
+    const dw::SampleData* getSampleForDisplay() const { return currentSample.load(); }
+    juce::String getSampleName() const { return samplePath.isEmpty() ? juce::String ("built-in: glass choir") : juce::File (samplePath).getFileName(); }
+
+    // A fresh random scene: key, scale, chords, rates, grain pitch and modulation patch.
+    void rollScene();
+    std::atomic<int> sceneCounter { 0 };
+
     static constexpr int scopeSize = 1024;
     float scope[scopeSize] {};
     std::atomic<int> scopeWrite { 0 };
@@ -136,6 +148,18 @@ private:
         void timerCallback() override;
     };
     std::unique_ptr<CameraPoller> cameraPoller;
+    // Ambient engine
+    dw::DreamBank dream;
+    dw::GrainCloud grains;
+    dw::TapeFX tape;
+    bool grainLastTrig = false;
+    std::atomic<dw::SampleData*> currentSample { nullptr };
+    std::vector<std::unique_ptr<dw::SampleData>> sampleStore; // keeps old samples alive (message thread)
+    juce::String samplePath;
+    void makeDefaultSample();
+    int lastCamTrigForScene = 0;
+    double lastSceneTime = 0.0;
+    void applyPlayMode();
     // FX
     dw::Ensemble ensemble;
     dw::TapeEcho echo;
@@ -161,6 +185,9 @@ private:
         float echoTime = 0.3f, echoFb = 0.5f, echoMix = 0.3f, echoWow = 0.3f;
         float revSize = 0.75f, revDamp = 0.5f, revMix = 0.4f;
         float camSlew = 0.3f, tune = 0.0f;
+        int dreamChord = 0; float dreamRate = 1, dreamTone = 0.3f, dreamWarp = 0.4f, dreamLevel = 0.5f;
+        float gPos = 0.3f, gSpray = 0.3f, gSize = 0.2f, gDensity = 12, gPitch = 0, gRev = 0.2f, gScan = 0.1f, gLevel = 0.4f;
+        float tWow = 0.3f, tAge = 0.3f, tHiss = 0.2f, tCrush = 0.0f, shimmer = 0.3f;
     } p;
 
     double sr = 44100.0;

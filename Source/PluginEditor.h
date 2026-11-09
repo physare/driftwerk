@@ -2,14 +2,25 @@
 
 #include <juce_audio_utils/juce_audio_utils.h>
 #include "PluginProcessor.h"
+#include "SlimeSim.h"
 
-class DriftwerkEditor;
+class MainView;
 
 //==============================================================================
-class RackLookAndFeel : public juce::LookAndFeel_V4
+// Look: black field, hairline rules, acid-yellow (#f0f870) light, thin Helvetica-style type.
+namespace dwui
+{
+const juce::Colour bg (0xff000000), panel (0xff070707), fg (0xffffffff),
+                   fg2 (0x9effffff), fg3 (0x61ffffff), rule (0x29ffffff),
+                   acid (0xfff0f870), acidDim (0x8cf0f870);
+juce::Font font (float size, bool bold = false);
+juce::Font mono (float size);
+}
+
+class SlimeLookAndFeel : public juce::LookAndFeel_V4
 {
 public:
-    RackLookAndFeel();
+    SlimeLookAndFeel();
     void drawRotarySlider (juce::Graphics&, int x, int y, int w, int h, float pos,
                            float startAngle, float endAngle, juce::Slider&) override;
     void drawComboBox (juce::Graphics&, int w, int h, bool down, int, int, int, int, juce::ComboBox&) override;
@@ -17,13 +28,14 @@ public:
     void positionComboBoxText (juce::ComboBox&, juce::Label&) override;
     void drawToggleButton (juce::Graphics&, juce::ToggleButton&, bool, bool) override;
     void drawButtonBackground (juce::Graphics&, juce::Button&, const juce::Colour&, bool, bool) override;
-    juce::Font getTextButtonFont (juce::TextButton&, int) override;
+    void drawButtonText (juce::Graphics&, juce::TextButton&, bool, bool) override;
     void drawBubble (juce::Graphics&, juce::BubbleComponent&, const juce::Point<float>&, const juce::Rectangle<float>&) override;
     juce::Font getSliderPopupFont (juce::Slider&) override;
+    void drawPopupMenuBackground (juce::Graphics&, int w, int h) override;
+    juce::Font getPopupMenuFont() override;
 };
 
 //==============================================================================
-// Rotary knob that opens the modulation menu on right-click.
 class ModSlider : public juce::Slider
 {
 public:
@@ -43,7 +55,7 @@ public:
 class JackComponent : public juce::Component
 {
 public:
-    JackComponent (DriftwerkEditor& e, bool output, int index) : editor (e), isOutput (output), idx (index) {}
+    JackComponent (MainView& v, bool output, int index) : view (v), isOutput (output), idx (index) {}
     void paint (juce::Graphics&) override;
     void mouseDown (const juce::MouseEvent&) override;
     void mouseDrag (const juce::MouseEvent&) override;
@@ -51,23 +63,21 @@ public:
     void mouseEnter (const juce::MouseEvent&) override { hover = true; repaint(); }
     void mouseExit (const juce::MouseEvent&) override { hover = false; repaint(); }
 
-    DriftwerkEditor& editor;
+    MainView& view;
     const bool isOutput;
     const int idx;
     float led = 0.0f;
     bool hover = false;
 };
 
-//==============================================================================
 class CableLayer : public juce::Component
 {
 public:
-    explicit CableLayer (DriftwerkEditor& e) : editor (e) { setInterceptsMouseClicks (false, false); }
+    explicit CableLayer (MainView& v) : view (v) { setInterceptsMouseClicks (false, false); }
     void paint (juce::Graphics&) override;
-    DriftwerkEditor& editor;
+    MainView& view;
 };
 
-//==============================================================================
 class ScopeComponent : public juce::Component
 {
 public:
@@ -84,23 +94,59 @@ public:
     DriftwerkProcessor& proc;
 };
 
-//==============================================================================
-class DriftwerkEditor : public juce::AudioProcessorEditor, private juce::Timer
+class SlimeView : public juce::Component
 {
 public:
-    explicit DriftwerkEditor (DriftwerkProcessor&);
-    ~DriftwerkEditor() override;
+    explicit SlimeView (DriftwerkProcessor& p) : proc (p), sim (300, 128, 22000) {}
+    void paint (juce::Graphics&) override;
+    void advance();
+    DriftwerkProcessor& proc;
+    SlimeSim sim;
+    juce::Image frame;
+};
+
+class GrainView : public juce::Component
+{
+public:
+    explicit GrainView (DriftwerkProcessor& p) : proc (p) {}
+    void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override;
+    void rebuildPeaks();
+    DriftwerkProcessor& proc;
+    const dw::SampleData* shownSample = nullptr;
+    std::vector<float> peaks;
+    bool dragHover = false;
+    std::function<void()> onClickLoad;
+};
+
+//==============================================================================
+// The whole instrument, laid out at a fixed design size; the editor scales it.
+class MainView : public juce::Component, private juce::Timer, public juce::FileDragAndDropTarget
+{
+public:
+    explicit MainView (DriftwerkProcessor&);
+    ~MainView() override;
+
+    static constexpr int designW = 1500, designH = 1104;
 
     void paint (juce::Graphics&) override;
     void resized() override;
 
+    bool isInterestedInFileDrag (const juce::StringArray&) override { return true; }
+    void fileDragEnter (const juce::StringArray&, int, int) override { grainView->dragHover = true; grainView->repaint(); }
+    void fileDragExit (const juce::StringArray&) override { grainView->dragHover = false; grainView->repaint(); }
+    void filesDropped (const juce::StringArray& files, int, int) override;
+
     // Patching
     void beginDrag (JackComponent& from);
-    void dragTo (juce::Point<float> editorPos);
-    void endDrag (juce::Point<float> editorPos);
+    void dragTo (juce::Point<float> pos);
+    void endDrag (juce::Point<float> pos);
     void clearJack (JackComponent& j);
     juce::Point<float> jackCentre (bool output, int idx) const;
     juce::Colour cableColour (int out, int in) const;
+
+    void refreshNow() { timerCallback(); } // used by the offline render tool
+    void advanceSlime (int steps) { for (int i = 0; i < steps; ++i) slime->advance(); }
 
     DriftwerkProcessor& proc;
     int dragOut = -1, dragIn = -1;
@@ -111,27 +157,28 @@ private:
     void timerCallback() override;
     void buildModule (int specIndex);
     void refreshPatch();
+    void showModMenu (ModSlider& s);
+    void chooseSample();
 
-    struct ControlDef { const char* param; const char* label; int kind; int rx = -1, ry = -1; }; // 0 knob, 1 combo, 2 toggle; rx/ry = fixed cell offset
+    struct ControlDef { const char* param; const char* label; int kind; int rx = -1, ry = -1; }; // 0 knob, 1 combo, 2 toggle
     struct ModuleSpec
     {
         int module; const char* title; const char* subtitle;
-        int row, x, w, cols; bool dark; juce::uint32 accent;
+        int row, x, w, cols;
         std::vector<ControlDef> controls;
+        bool compactJacks = false;
     };
+    static int rowTop (int row) { return row == 0 ? 60 : (row == 1 ? 372 : 740); }
+    static int rowHeight (int row) { return row == 0 ? 304 : 360; }
+
     std::vector<ModuleSpec> specs;
     std::vector<juce::Rectangle<int>> moduleRects;
-    struct TextLabel { juce::Rectangle<int> r; juce::String text; bool dark; };
+    struct TextLabel { juce::Rectangle<int> r; juce::String text; bool jack; };
     std::vector<TextLabel> labels;
     std::vector<juce::Rectangle<int>> outputPlates;
-    std::vector<bool> outputPlatesDark;
 
-    RackLookAndFeel lnf;
+    SlimeLookAndFeel lnf;
     std::vector<std::unique_ptr<ModSlider>> sliders;
-    void showModMenu (ModSlider& s);
-public:
-    void refreshNow() { timerCallback(); } // used by the offline render tool
-private:
     std::vector<std::unique_ptr<juce::ComboBox>> combos;
     std::vector<std::unique_ptr<juce::ToggleButton>> toggles;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAtt;
@@ -142,18 +189,29 @@ private:
     std::unique_ptr<CableLayer> cables;
     std::unique_ptr<ScopeComponent> scope;
     std::unique_ptr<CameraView> cameraView;
-    juce::Rectangle<int> arpLedArea;
-    std::array<juce::Rectangle<int>, 4> moduleLedAreas; // LFO1, LFO2, ENV1, ENV2 activity LEDs
-    juce::Rectangle<int> scopeRect, cameraRect;
+    std::unique_ptr<SlimeView> slime;
+    std::unique_ptr<GrainView> grainView;
+    juce::Rectangle<int> arpLedArea, slimeRect, playRect;
+    std::array<juce::Rectangle<int>, 4> moduleLedAreas;
 
     juce::ComboBox presetBox;
-    juce::TextButton randomButton { "RANDOM PATCH" }, clearButton { "PULL ALL" }, dimButton { "DIM CABLES" };
+    juce::TextButton sceneButton { "NEW SCENE" }, randomButton { "RANDOM PATCH" }, clearButton { "PULL ALL" },
+                     dimButton { "DIM CABLES" }, loadButton { "LOAD SOUND" };
+    std::unique_ptr<juce::FileChooser> chooser;
 
-    int lastArpStep = -1;
     juce::String lastPatch;
+    int frameCounter = 0;
 
-    static constexpr int headerH = 46, railH = 12, rowH = 360;
-    static constexpr int editorW = 1360;
+    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (MainView)
+};
 
-    JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (DriftwerkEditor)
+//==============================================================================
+class DriftwerkEditor : public juce::AudioProcessorEditor
+{
+public:
+    explicit DriftwerkEditor (DriftwerkProcessor&);
+    void resized() override;
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
+    void refreshNow() { view.refreshNow(); }
+    MainView view;
 };
