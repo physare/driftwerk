@@ -36,7 +36,7 @@ int main (int argc, char** argv)
             proc.camera.analyse (frame);
         }
     }
-    proc.setCurrentProgram (program);
+    proc.loadPreset (program);
     if (auto* env = std::getenv ("DW_SET"))
     {
         juce::StringArray kv; kv.addTokens (env, ",", "");
@@ -99,7 +99,7 @@ int main (int argc, char** argv)
             for (int k = 0; k < 8; ++k) { proc.camera.analyse (photo); juce::Thread::sleep (150); }
             std::printf ("hand %s  pinch %.2f spread %.2f fist %.2f tilt %.2f  %.1f ms  (%s)\n", proc.camera.hand.present.load() ? "found" : "none",
                          proc.camera.hand.pinch.load(), proc.camera.hand.spread.load(), proc.camera.hand.fist.load(), proc.camera.hand.tilt.load(),
-                         proc.camera.hand.inferenceMs.load(), proc.camera.hand.status.toRawUTF8());
+                         proc.camera.hand.inferenceMs.load(), proc.camera.hand.getStatus().toRawUTF8());
             juce::AudioBuffer<float> tmp (2, 512); juce::MidiBuffer mb;
             for (int k = 0; k < 400; ++k) proc.processBlock (tmp, mb);   // let the gesture outputs settle
         }

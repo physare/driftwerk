@@ -12,7 +12,7 @@ int main (int argc, char** argv)
         HandTracker ht;
         const auto img = juce::ImageFileFormat::loadFrom (juce::File (juce::String (argv[a])));
         const bool found = ht.processStill (img);
-        std::printf ("%s %s %s\n", argv[a], found ? "HAND" : "none", ht.status.toRawUTF8());
+        std::printf ("%s %s %s\n", argv[a], found ? "HAND" : "none", ht.getStatus().toRawUTF8());
         if (! found) continue;
         const auto pose = ht.getPose();
         std::printf ("J");

@@ -34,7 +34,7 @@ public:
     {
        #if JUCE_USE_CAMERA
         if (device != nullptr) return true;
-        hand.start(); // loads the hand skeleton models once; falls back to motion only if missing
+        if (hand.enabled.load()) hand.start(); // loads the hand skeleton once; motion tracking works without it
         const auto names = juce::CameraDevice::getAvailableDevices();
         status = names.isEmpty() ? "NO CAMERA FOUND" : "STARTING";
         if (names.isEmpty()) return false;

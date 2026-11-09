@@ -1,6 +1,7 @@
 #include "PluginProcessor.h"
 #include "PluginEditor.h"
 #include <juce_audio_formats/juce_audio_formats.h>
+#include <map>
 
 using namespace dw;
 
@@ -53,17 +54,56 @@ NRange skewed (float lo, float hi, float centre)
 
 struct Preset
 {
+    const char* group;                                  // section in the preset menu
     const char* name;
-    const char* patch;
-    std::vector<std::pair<const char*, float>> values; // real (un-normalised) values
+    const char* patch;                                  // nullptr = the default patch
+    std::vector<std::pair<const char*, float>> values; // real (un-normalised) values; the rest go to defaults
     const char* mods = nullptr;                         // knob modulation, see setModFromString
 };
+
+// Shared building blocks for patches.
+#define SEQ_CORE "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;mix.out>vcf1.in;arp.gate>env1.gate;" \
+                 "env1.out>vcf1.cv1;env1.out>vca1.cv;vcf1.out>vca1.in;vca1.out>out.in1;"
+#define DRONE_OUT "drn.out>vcf2.in;vcf2.out>out.in2;"
 
 const std::vector<Preset>& presets()
 {
     static const std::vector<Preset> list {
-        { "Drift Cathedral", nullptr, {} },
-        { "Mirror Sequence",
+        //======================================================================  SOUNDBATH: no plucks, all breath
+        { "Soundbath", "Drift Cathedral", nullptr, {} },
+        { "Soundbath", "Singing Bowls", DRONE_OUT "lfo1.out>vcf2.cv1;lfo2.out>vcf2.cv2",
+          { { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 1 },
+            { "drn.chord", 2 }, { "drn.oct", -2 }, { "drn.detune", 0.25f }, { "drn.level", 0.8f },
+            { "vcf2.cut", 520 }, { "vcf2.res", 0.88f }, { "vcf2.cv1", 0.55f }, { "vcf2.cv2", 0.35f }, { "out.lvl2", 0.55f },
+            { "lfo1.rate", 0.018f }, { "lfo2.rate", 0.045f }, { "lfo2.shape", 3 },
+            { "dream.chord", 2 }, { "dream.rate", 0.45f }, { "dream.tone", 0.2f }, { "dream.warp", 0.15f }, { "dream.level", 0.8f },
+            { "grain.level", 0.3f }, { "grain.size", 1.1f }, { "grain.density", 3 }, { "grain.pitch", 12 }, { "grain.spray", 0.6f },
+            { "hall.size", 0.97f }, { "hall.mix", 0.62f }, { "hall.shimmer", 0.55f }, { "out.ens", 0.7f },
+            { "tape.wow", 0.12f }, { "tape.hiss", 0.08f }, { "echo.mix", 0.15f } } },
+        { "Soundbath", "Low Tide Breathing", "drn.out>vcf2.in;vcf2.out>vca2.in;vca2.out>out.in2;lfo1.out>vca2.cv;lfo2.out>vcf2.cv1",
+          { { "arp.on", 0 }, { "out.lvl1", 0 },
+            { "drn.chord", 1 }, { "drn.oct", -2 }, { "drn.detune", 0.6f }, { "vca2.gain", 0.25f }, { "vca2.cv", 0.75f },
+            { "lfo1.rate", 0.08f }, { "lfo1.shape", 0 }, { "lfo2.rate", 0.01f }, { "lfo2.shape", 3 },
+            { "vcf2.cut", 320 }, { "vcf2.res", 0.4f }, { "vcf2.cv1", 0.4f },
+            { "dream.chord", 1 }, { "dream.rate", 0.3f }, { "dream.level", 0.5f }, { "dream.tone", 0.15f },
+            { "tape.hiss", 0.32f }, { "tape.wow", 0.2f }, { "tape.age", 0.35f },
+            { "grain.level", 0.15f }, { "grain.pitch", -12 }, { "grain.size", 0.9f }, { "hall.mix", 0.55f }, { "hall.size", 0.92f } } },
+        { "Soundbath", "Cathedral Ghosts", DRONE_OUT "lfo1.out>vcf2.cv1",
+          { { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 7 },
+            { "drn.chord", 2 }, { "drn.level", 0.4f },
+            { "grain.reverse", 0.9f }, { "grain.pitch", -12 }, { "grain.size", 1.2f }, { "grain.density", 6 },
+            { "grain.spray", 0.8f }, { "grain.level", 0.6f }, { "grain.scan", 0.02f },
+            { "dream.chord", 3 }, { "dream.level", 0.6f }, { "dream.rate", 0.5f },
+            { "hall.size", 0.99f }, { "hall.mix", 0.7f }, { "hall.shimmer", 0.7f },
+            { "echo.div", 5 }, { "echo.fb", 0.72f }, { "echo.mix", 0.3f } } },
+        { "Soundbath", "Airport Tapes", "drn.out>vcf2.in;lfo1.out>vcf2.cv1;vcf2.out>out.in2;clk.div4>nz.clk;nz.snh>vcf2.cv2",
+          { { "dream.level", 0.9f }, { "dream.chord", 0 }, { "dream.rate", 0.7f }, { "dream.warp", 0.35f },
+            { "drn.level", 0.35f }, { "drn.chord", 2 }, { "grain.level", 0.3f }, { "grain.size", 0.6f }, { "grain.density", 4 },
+            { "tape.wow", 0.35f }, { "tape.age", 0.4f }, { "tape.hiss", 0.25f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.5f },
+            { "echo.mix", 0.2f }, { "arp.scale", 6 } } },
+
+        //======================================================================  PLUCKS + SEQUENCES
+        { "Plucks + sequences", "Mirror Sequence",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.saw>mix.in1;vco2.saw>mix.in2;"
           "mix.out>vcf1.in;arp.gate>env1.gate;env1.out>vcf1.cv1;env1.out>vca1.cv;lfo1.out>vcf1.cv2;"
           "vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;lfo2.out>vcf2.cv1;vcf2.out>out.in2;"
@@ -71,23 +111,103 @@ const std::vector<Preset>& presets()
           { { "clk.div", 3 }, { "arp.mutate", 0.06f }, { "arp.walk", 0.8f }, { "vcf1.res", 0.72f },
             { "vcf1.cut", 380 }, { "vcf1.cv2", 0.7f }, { "lfo1.rate", 0.02f }, { "drn.chord", 2 },
             { "echo.div", 2 }, { "echo.fb", 0.68f }, { "echo.mix", 0.45f }, { "vco2.fine", 0.12f } } },
-        { "Black Tide",
+        { "Plucks + sequences", "Berlin Night Drive",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.sub>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT "lfo2.out>vcf2.cv1",
+          { { "clk.div", 3 }, { "arp.follow", 0 }, { "arp.scale", 0 }, { "arp.len", 8 }, { "arp.mutate", 0.04f },
+            { "arp.walk", 0.3f }, { "arp.density", 0.95f }, { "arp.range", 2 }, { "arp.gate", 0.35f },
+            { "vco2.oct", -1 }, { "vcf1.cut", 300 }, { "vcf1.res", 0.8f }, { "vcf1.drive", 0.55f }, { "vcf1.cv1", 0.6f },
+            { "vcf1.cv2", 0.75f }, { "lfo1.rate", 0.012f }, { "lfo1.shape", 1 }, { "env1.d", 0.22f },
+            { "drn.chord", 1 }, { "drn.level", 0.45f }, { "dream.chord", 1 }, { "dream.level", 0.25f },
+            { "echo.div", 2 }, { "echo.fb", 0.62f }, { "echo.mix", 0.4f }, { "hall.mix", 0.45f } } },
+        { "Plucks + sequences", "Glass Harp",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;lfo2.out>vco1.pwm;" DRONE_OUT,
+          { { "clk.div", 3 }, { "arp.follow", 1 }, { "arp.scale", 6 }, { "arp.root", 48 }, { "arp.range", 3 },
+            { "arp.density", 0.7f }, { "arp.mutate", 0.15f }, { "arp.walk", 0.7f }, { "arp.gate", 0.15f },
+            { "env1.a", 0.001f }, { "env1.d", 0.12f }, { "env1.r", 0.15f },
+            { "vcf1.cut", 900 }, { "vcf1.res", 0.75f }, { "vcf1.cv1", 0.75f }, { "vcf1.cv2", 0.0f }, { "vco2.oct", 1 },
+            { "dream.chord", 4 }, { "dream.level", 0.35f }, { "drn.chord", 2 }, { "drn.level", 0.3f },
+            { "echo.div", 2 }, { "echo.fb", 0.6f }, { "echo.mix", 0.45f }, { "hall.mix", 0.45f }, { "hall.shimmer", 0.35f } } },
+        { "Plucks + sequences", "Kalimba Rain",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.sub>vco1.fm;arp.gate>grain.trig;" DRONE_OUT,
+          { { "clk.div", 4 }, { "arp.follow", 0 }, { "arp.scale", 3 }, { "arp.root", 45 }, { "arp.range", 4 },
+            { "arp.density", 0.45f }, { "arp.mutate", 0.3f }, { "arp.walk", 0.4f }, { "arp.gate", 0.1f },
+            { "vco1.fm", 0.35f }, { "vco2.oct", 1 }, { "env1.d", 0.18f }, { "env1.r", 0.25f },
+            { "vcf1.cut", 1400 }, { "vcf1.res", 0.35f }, { "vcf1.cv2", 0.0f },
+            { "grain.level", 0.3f }, { "grain.pitch", 12 }, { "grain.size", 0.05f }, { "grain.density", 1 }, { "grain.spray", 0.9f },
+            { "dream.chord", 1 }, { "dream.level", 0.3f }, { "drn.level", 0.3f }, { "drn.chord", 1 },
+            { "echo.div", 1 }, { "echo.fb", 0.5f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f } } },
+        { "Plucks + sequences", "Toy Piano Ghost",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;" DRONE_OUT,
+          { { "clk.div", 1 }, { "arp.follow", 1 }, { "arp.scale", 6 }, { "arp.root", 48 }, { "arp.density", 0.6f },
+            { "arp.gate", 0.2f }, { "vco1.oct", 1 }, { "vco2.oct", 2 }, { "vco2.fine", 0.05f }, { "vco1.pw", 0.3f },
+            { "env1.d", 0.25f }, { "vcf1.cut", 2200 }, { "vcf1.res", 0.2f }, { "vcf1.cv2", 0.0f },
+            { "tape.wow", 0.6f }, { "tape.age", 0.6f }, { "tape.crush", 0.2f }, { "tape.hiss", 0.3f },
+            { "dream.chord", 0 }, { "dream.warp", 0.7f }, { "dream.level", 0.45f }, { "drn.level", 0.25f }, { "drn.chord", 2 },
+            { "echo.div", 3 }, { "echo.mix", 0.3f }, { "hall.mix", 0.5f } } },
+        { "Plucks + sequences", "Black Tide",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.sub>mix.in1;vco2.pls>mix.in2;"
           "mix.out>vcf1.in;arp.gate>env1.gate;env1.out>vcf1.cv1;env1.out>vca1.cv;lfo2.out>vcf1.cv2;"
           "vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;lfo1.out>vcf2.cv1;env2.out>vcf2.cv2;"
           "clk.div4>env2.gate;vcf2.out>out.in2",
-          { { "clk.div", 1 }, { "arp.root", 31 }, { "arp.scale", 2 }, { "arp.density", 0.6f },
-            { "drn.chord", 5 }, { "drn.oct", -2 }, { "drn.detune", 0.7f }, { "hall.size", 0.95f },
+          { { "clk.div", 1 }, { "arp.root", 31 }, { "arp.scale", 2 }, { "arp.follow", 0 }, { "arp.density", 0.6f }, { "dream.chord", 5 },
+            { "drn.chord", 5 }, { "drn.oct", -2 }, { "drn.detune", 0.7f }, { "hall.size", 0.95f }, { "dream.level", 0.2f },
             { "hall.mix", 0.6f }, { "env2.a", 3 }, { "env2.r", 10 }, { "vcf2.cv2", 0.35f }, { "lfo1.shape", 3 } } },
-        { "Pulse Engine",
+        { "Plucks + sequences", "Pulse Engine",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.pls>mix.in1;vco2.saw>mix.in2;"
           "mix.out>vcf1.in;arp.gate>env1.gate;env1.out>vcf1.cv1;env1.out>vca1.cv;nz.snh>vcf1.cv2;"
           "clk.out>nz.clk;vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;lfo1.out>vcf2.cv1;"
           "lfo2.out>vco1.pwm;vcf2.out>out.in2",
-          { { "clk.div", 4 }, { "arp.scale", 2 }, { "arp.range", 3 }, { "arp.mutate", 0.25f },
-            { "vco2.oct", 1 }, { "vcf1.cv2", 0.35f }, { "nz.slew", 0.1f }, { "echo.div", 1 },
+          { { "clk.div", 4 }, { "arp.scale", 2 }, { "arp.follow", 0 }, { "arp.range", 3 }, { "arp.mutate", 0.25f },
+            { "vco2.oct", 1 }, { "vcf1.cv2", 0.35f }, { "nz.slew", 0.1f }, { "echo.div", 1 }, { "dream.level", 0.2f }, { "dream.chord", 5 },
             { "drn.level", 0.45f }, { "env1.d", 0.18f } } },
-        { "Hand Weather (camera)",
+
+        //======================================================================  WEIRD: still in key, but strange
+        { "Weird", "Warped Cassette", nullptr,
+          { { "dream.level", 0.75f }, { "dream.chord", 1 }, { "dream.warp", 0.95f }, { "grain.level", 0.6f }, { "grain.pitch", -12 },
+            { "grain.reverse", 0.6f }, { "tape.wow", 0.85f }, { "tape.age", 0.8f }, { "tape.hiss", 0.5f }, { "tape.crush", 0.35f },
+            { "out.lvl1", 0.35f }, { "clk.div", 1 }, { "vcf1.cut", 300 }, { "hall.mix", 0.4f } } },
+        { "Weird", "Insect Choir",
+          SEQ_CORE "vco1.pls>mix.in1;arp.rnd>vco2.fm;vco2.saw>mix.in2;lfo2.out>vcf1.cv2;" DRONE_OUT,
+          { { "clk.div", 5 }, { "arp.follow", 0 }, { "arp.scale", 5 }, { "arp.range", 4 }, { "arp.density", 0.35f },
+            { "arp.mutate", 0.5f }, { "arp.gate", 0.08f }, { "env1.d", 0.04f }, { "env1.r", 0.06f },
+            { "vcf1.cut", 2000 }, { "vcf1.res", 0.9f }, { "vcf1.cv2", 0.4f }, { "lfo2.rate", 6.0f }, { "lfo2.shape", 2 },
+            { "vco2.fm", 0.6f }, { "vco2.oct", 2 },
+            { "grain.level", 0.3f }, { "grain.size", 0.02f }, { "grain.density", 60 }, { "grain.spray", 1.0f }, { "grain.pitch", 19 },
+            { "dream.chord", 3 }, { "dream.level", 0.2f }, { "drn.level", 0.3f }, { "drn.chord", 4 },
+            { "hall.mix", 0.5f }, { "echo.div", 4 }, { "echo.mix", 0.3f } } },
+        { "Weird", "Broken Radio Prayer",
+          SEQ_CORE "vco1.saw>mix.in1;nz.noise>mix.in3;nz.snh>vcf1.cv2;clk.div4>nz.clk;" DRONE_OUT,
+          { { "arp.follow", 2 }, { "arp.density", 0.3f }, { "arp.gate", 0.7f }, { "clk.div", 1 },
+            { "mix.l3", 0.25f }, { "vcf1.res", 0.85f }, { "vcf1.cv2", 0.6f }, { "nz.slew", 0.6f },
+            { "tape.crush", 0.6f }, { "tape.age", 0.9f }, { "tape.hiss", 0.6f }, { "tape.wow", 0.7f },
+            { "grain.scan", -0.4f }, { "grain.pitch", -7 }, { "grain.level", 0.5f }, { "grain.reverse", 0.5f },
+            { "dream.warp", 1.0f }, { "dream.level", 0.5f }, { "dream.chord", 2 },
+            { "echo.div", 6 }, { "echo.ms", 333 }, { "echo.fb", 0.85f }, { "echo.wow", 0.8f }, { "echo.mix", 0.4f } } },
+        { "Weird", "Gravity Well",
+          "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.saw>mix.in1;vco2.saw>vco1.fm;mix.out>vcf1.in;"
+          "vcf1.out>vca1.in;vca1.out>out.in1;lfo2.out>vcf1.cv2;lfo1.out>drn.pitch;" DRONE_OUT,
+          { { "clk.div", 0 }, { "arp.density", 0.3f }, { "arp.range", 1 }, { "arp.follow", 2 }, { "arp.mutate", 0.1f },
+            { "vco1.oct", -1 }, { "vco1.fm", 0.7f }, { "vco2.oct", -1 }, { "vco2.fine", 0.3f },
+            { "vca1.gain", 0.45f }, { "vcf1.cut", 260 }, { "vcf1.res", 0.6f }, { "vcf1.cv2", 0.6f },
+            { "lfo1.rate", 0.007f }, { "lfo1.shape", 3 }, { "lfo2.rate", 0.03f },
+            { "drn.oct", -2 }, { "drn.chord", 1 }, { "drn.drift", 0.9f }, { "dream.level", 0.35f }, { "dream.chord", 5 },
+            { "hall.size", 0.98f }, { "hall.mix", 0.6f }, { "hall.damp", 0.7f }, { "tape.wow", 0.4f }, { "out.lvl1", 0.55f } } },
+        { "Weird", "Clockwork Jellyfish",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;lfo2.out>lfo1.rate;lfo1.out>vco1.pwm;clk.div4>env2.gate;"
+          "env2.out>vcf2.cv1;clk.div4>grain.trig;" DRONE_OUT,
+          { { "clk.div", 4 }, { "arp.follow", 1 }, { "arp.len", 7 }, { "arp.density", 0.75f }, { "arp.mutate", 0.08f },
+            { "arp.gate", 0.25f }, { "env1.d", 0.15f }, { "vcf1.res", 0.7f },
+            { "env2.a", 0.005f }, { "env2.d", 0.6f }, { "env2.s", 0.0f }, { "env2.r", 0.8f },
+            { "vcf2.res", 0.85f }, { "vcf2.cut", 400 }, { "vcf2.cv1", 0.7f }, { "drn.chord", 1 },
+            { "lfo1.rate", 0.4f }, { "lfo2.rate", 0.05f }, { "vco1.pwm", 0.8f },
+            { "grain.level", 0.35f }, { "grain.pitch", 24 }, { "grain.size", 0.04f }, { "grain.density", 1 },
+            { "dream.chord", 5 }, { "dream.level", 0.3f }, { "echo.div", 4 }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f } } },
+
+        //======================================================================  HANDS: the camera plays it
+        { "Hands (camera)", "Hand Garden", nullptr,
+          { { "cam.on", 1 }, { "play.on", 1 }, { "play.depth", 0.85f }, { "dream.level", 0.7f }, { "grain.level", 0.5f },
+            { "tape.wow", 0.5f }, { "tape.age", 0.5f }, { "hall.shimmer", 0.4f }, { "out.lvl1", 0.3f } } },
+        { "Hands (camera)", "Hand Weather",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.saw>mix.in1;vco2.pls>mix.in2;"
           "mix.out>vcf1.in;arp.gate>env1.gate;env1.out>vcf1.cv1;env1.out>vca1.cv;cam.y>vcf1.cv2;"
           "lfo2.out>vco2.pwm;vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;cam.x>vcf2.cv1;"
@@ -95,21 +215,26 @@ const std::vector<Preset>& presets()
           { { "cam.on", 1 }, { "vcf1.cv2", 0.6f }, { "vcf2.cv1", 0.55f }, { "vcf2.cv2", 0.5f },
             { "env2.a", 0.05f }, { "env2.d", 2.5f }, { "env2.s", 0.0f }, { "env2.r", 3.0f } },
           "hall.mix<cam.y@0.45;echo.fb<cam.mot@0.35;arp.mutate<cam.mot@0.5" },
-        { "Hand Garden (camera play)", nullptr,
-          { { "cam.on", 1 }, { "play.on", 1 }, { "play.depth", 0.85f }, { "dream.level", 0.7f }, { "grain.level", 0.5f },
-            { "tape.wow", 0.5f }, { "tape.age", 0.5f }, { "hall.shimmer", 0.4f }, { "out.lvl1", 0.3f } } },
-        { "Airport Tapes", "drn.out>vcf2.in;lfo1.out>vcf2.cv1;vcf2.out>out.in2;clk.div4>nz.clk;nz.snh>vcf2.cv2",
-          { { "dream.level", 0.9f }, { "dream.chord", 0 }, { "dream.rate", 0.7f }, { "dream.warp", 0.35f },
-            { "drn.level", 0.35f }, { "drn.chord", 2 }, { "grain.level", 0.3f }, { "grain.size", 0.6f }, { "grain.density", 4 },
-            { "tape.wow", 0.35f }, { "tape.age", 0.4f }, { "tape.hiss", 0.25f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.5f },
-            { "echo.mix", 0.2f } } },
-        { "Warped Cassette", nullptr,
-          { { "dream.level", 0.75f }, { "dream.chord", 1 }, { "dream.warp", 0.95f }, { "grain.level", 0.6f }, { "grain.pitch", -12 },
-            { "grain.reverse", 0.6f }, { "tape.wow", 0.85f }, { "tape.age", 0.8f }, { "tape.hiss", 0.5f }, { "tape.crush", 0.35f },
-            { "out.lvl1", 0.35f }, { "clk.div", 1 }, { "vcf1.cut", 300 }, { "hall.mix", 0.4f } } },
+        { "Hands (camera)", "Puppet Strings",
+          "cam.trig>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.saw>mix.in1;vco2.pls>mix.in2;mix.out>vcf1.in;"
+          "arp.gate>env1.gate;env1.out>vcf1.cv1;env1.out>vca1.cv;cam.spread>vcf1.cv2;vcf1.out>vca1.in;vca1.out>out.in1;"
+          "drn.out>vcf2.in;cam.fist>vcf2.cv1;vcf2.out>out.in2;cam.tilt>grain.pitch;cam.y>grain.pos",
+          { { "cam.on", 1 }, { "arp.density", 1.0f }, { "arp.follow", 1 }, { "arp.mutate", 0.5f }, { "arp.range", 3 },
+            { "env1.d", 0.6f }, { "env1.r", 1.2f }, { "vcf1.cv2", 0.6f }, { "vcf2.cv1", -0.5f },
+            { "hall.mix", 0.55f }, { "echo.mix", 0.4f }, { "grain.level", 0.4f } },
+          "hall.shimmer<cam.pinch@0.6;tape.wow<cam.mot@0.4" },
+        { "Hands (camera)", "Theremin Fog",
+          "cam.y>vco1.pitch;cam.y>vco2.pitch;vco1.saw>mix.in1;vco2.saw>mix.in2;mix.out>vcf1.in;cam.spread>vcf1.cv1;"
+          "vcf1.out>vca1.in;cam.pinch>vca1.cv;vca1.out>out.in1;cam.tilt>vco2.fm;" DRONE_OUT "lfo1.out>vcf2.cv1",
+          { { "cam.on", 1 }, { "cam.slew", 0.45f }, { "arp.on", 0 }, { "vco1.oct", 1 }, { "vco2.oct", 1 }, { "vco2.fine", 0.15f },
+            { "vco2.fm", 0.4f }, { "vcf1.cut", 600 }, { "vcf1.cv1", 0.7f }, { "vcf1.res", 0.4f },
+            { "vca1.gain", 0.0f }, { "vca1.cv", 1.0f }, { "dream.level", 0.4f }, { "dream.chord", 3 },
+            { "hall.mix", 0.65f }, { "hall.shimmer", 0.45f }, { "echo.mix", 0.35f }, { "echo.div", 4 } } },
     };
     return list;
 }
+#undef SEQ_CORE
+#undef DRONE_OUT
 } // namespace
 
 //==============================================================================
@@ -245,6 +370,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("play.depth", "Hand Play Depth", NRange (0.0f, 1.0f), 0.8f);
     // Camera
     bo ("cam.on", "Camera On", false);
+    bo ("cam.hands", "Hand Skeleton", true);
     fl ("cam.sens", "Camera Sensitivity", NRange (0.0f, 1.0f), 0.5f);
     fl ("cam.slew", "Camera Smoothing", NRange (0.0f, 1.0f), 0.3f);
 
@@ -443,6 +569,9 @@ void DriftwerkProcessor::CameraPoller::timerCallback()
     }
     const bool want = owner.apvts.getRawParameterValue ("cam.on")->load() > 0.5f;
     owner.camera.sensitivity.store (owner.apvts.getRawParameterValue ("cam.sens")->load());
+    const bool bones = owner.apvts.getRawParameterValue ("cam.hands")->load() > 0.5f;
+    owner.camera.hand.enabled.store (bones);
+    if (bones && owner.camera.isOpen() && ! owner.camera.hand.isReady()) owner.camera.hand.start();
     if (want && ! owner.camera.isOpen())
     {
         startTimer (owner.camera.open() ? 250 : 3000); // retry slowly if busy or missing
@@ -975,27 +1104,43 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 }
 
 //==============================================================================
-int DriftwerkProcessor::getNumPrograms() { return (int) presets().size(); }
+int DriftwerkProcessor::getNumPresets() { return (int) presets().size(); }
 
-const juce::String DriftwerkProcessor::getProgramName (int index)
+juce::String DriftwerkProcessor::getPresetName (int index)
 {
-    if (index >= 0 && index < getNumPrograms()) return presets()[(size_t) index].name;
+    if (index >= 0 && index < getNumPresets()) return presets()[(size_t) index].name;
     return {};
 }
 
-void DriftwerkProcessor::setCurrentProgram (int index)
+juce::String DriftwerkProcessor::getPresetGroup (int index)
 {
-    if (index < 0 || index >= getNumPrograms()) return;
+    if (index >= 0 && index < getNumPresets()) return presets()[(size_t) index].group;
+    return {};
+}
+
+void DriftwerkProcessor::loadPreset (int index)
+{
+    if (index < 0 || index >= getNumPresets()) return;
     currentProgram = index;
     const auto& pr = presets()[(size_t) index];
 
-    for (auto* param : getParameters())
-        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (param))
-            rp->setValueNotifyingHost (rp->getDefaultValue());
-
+    // Work out every parameter's final value first (preset value, else default), then send
+    // each one to the host once, as a complete gesture, and only if it actually changes.
+    std::map<juce::String, float> target;
     for (auto& [id, value] : pr.values)
         if (auto* rp = apvts.getParameter (id))
-            rp->setValueNotifyingHost (rp->convertTo0to1 (value));
+            target[id] = rp->convertTo0to1 (value);
+
+    for (auto* param : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (param))
+        {
+            const auto it = target.find (rp->getParameterID());
+            const float v = it != target.end() ? it->second : rp->getDefaultValue();
+            if (std::abs (rp->getValue() - v) < 1.0e-6f) continue;
+            rp->beginChangeGesture();
+            rp->setValueNotifyingHost (v);
+            rp->endChangeGesture();
+        }
 
     setPatchFromString (pr.patch != nullptr ? pr.patch : defaultPatch);
     setModFromString (pr.mods != nullptr ? pr.mods : "");
@@ -1008,6 +1153,7 @@ void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("mods", getModString(), nullptr);
     state.setProperty ("sample", samplePath, nullptr);
     state.setProperty ("program", currentProgram, nullptr);
+    state.setProperty ("presetName", getPresetName (currentProgram), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -1025,6 +1171,10 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
             const juce::String sp = state.getProperty ("sample", {}).toString();
             if (sp.isNotEmpty() && juce::File (sp).existsAsFile()) loadSample (juce::File (sp));
             currentProgram = state.getProperty ("program", 0);
+            const juce::String pn = state.getProperty ("presetName", {}).toString();
+            for (int i = 0; i < getNumPresets(); ++i)
+                if (pn.isNotEmpty() && getPresetName (i) == pn) currentProgram = i;
+            currentProgram = juce::jlimit (0, getNumPresets() - 1, currentProgram);
         }
     }
 }

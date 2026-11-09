@@ -86,11 +86,13 @@ public:
     DriftwerkProcessor& proc;
 };
 
-class CameraView : public juce::Component
+class CameraView : public juce::Component, public juce::SettableTooltipClient
 {
 public:
     explicit CameraView (DriftwerkProcessor& p) : proc (p) {}
     void paint (juce::Graphics&) override;
+    void mouseDown (const juce::MouseEvent&) override { if (onClick) onClick(); }
+    std::function<void()> onClick;
     DriftwerkProcessor& proc;
 };
 

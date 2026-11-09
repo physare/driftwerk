@@ -28,11 +28,19 @@ public:
     bool isMidiEffect() const override { return false; }
     double getTailLengthSeconds() const override { return 40.0; }
 
-    int getNumPrograms() override;
-    int getCurrentProgram() override { return currentProgram; }
-    void setCurrentProgram (int index) override;
-    const juce::String getProgramName (int index) override;
+    // Presets live inside the plugin's own menu. The host sees a single program, so it can
+    // never push an old program number back at us (that made presets snap back in Ableton).
+    int getNumPrograms() override { return 1; }
+    int getCurrentProgram() override { return 0; }
+    void setCurrentProgram (int) override {}
+    const juce::String getProgramName (int) override { return getPresetName (currentProgram); }
     void changeProgramName (int, const juce::String&) override {}
+
+    static int getNumPresets();
+    static juce::String getPresetName (int index);
+    static juce::String getPresetGroup (int index);
+    int getCurrentPreset() const { return currentProgram; }
+    void loadPreset (int index);
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;

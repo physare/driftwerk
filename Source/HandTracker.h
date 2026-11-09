@@ -38,25 +38,31 @@ public:
 
     void shutdown()
     {
-        if (isThreadRunning()) { signalThreadShouldExit(); wake.signal(); stopThread (2000); }
+        if (isThreadRunning()) { signalThreadShouldExit(); wake.signal(); stopThread (4000); }
+        ready = false;
+        // Sessions belong to this instance. The ONNX Runtime library and its environment are
+        // shared by every Timewind in the process and deliberately never unloaded, because
+        // unloading the runtime while the host keeps running is a known way to crash.
         if (api != nullptr)
         {
             if (palm) api->ReleaseSession (palm);
             if (marks) api->ReleaseSession (marks);
             if (mem) api->ReleaseMemoryInfo (mem);
-            if (env) api->ReleaseEnv (env);
         }
-        palm = marks = nullptr; mem = nullptr; env = nullptr; api = nullptr;
-        ready = false;
+        palm = marks = nullptr; mem = nullptr;
     }
 
     bool isReady() const { return ready; }
-    juce::String status;
+
+    // Lets the user switch the skeleton off (it then uses no CPU at all).
+    std::atomic<bool> enabled { true };
+
+    juce::String getStatus() const { const juce::SpinLock::ScopedLockType sl (statusLock); return status; }
 
     // Camera thread: hand over the newest frame; older pending frames are dropped.
     void submit (const juce::Image& frame)
     {
-        if (! ready || ! frame.isValid()) return;
+        if (! ready || ! enabled.load() || ! frame.isValid()) return;
         const int w = frame.getWidth(), h = frame.getHeight();
         {
             const juce::SpinLock::ScopedLockType sl (frameLock);
@@ -123,16 +129,27 @@ private:
         juce::File dir;
         for (auto& d : dirs)
             if (d.getChildFile ("hand_landmarks_detector.onnx").existsAsFile() && d.getChildFile (libName).existsAsFile()) { dir = d; break; }
-        if (dir == juce::File()) { status = "HAND MODEL NOT FOUND"; return false; }
+        if (dir == juce::File()) { setStatus ("HAND MODEL NOT FOUND"); return false; }
 
-        if (! lib.open (dir.getChildFile (libName).getFullPathName())) { status = "HAND ENGINE WON'T LOAD"; return false; }
-        using GetBase = const OrtApiBase* (ORT_API_CALL*) ();
-        auto getBase = (GetBase) lib.getFunction ("OrtGetApiBase");
-        if (getBase == nullptr) { status = "HAND ENGINE BROKEN"; return false; }
-        api = getBase()->GetApi (ORT_API_VERSION);
-        if (api == nullptr) { status = "HAND ENGINE TOO OLD"; return false; }
-
-        if (! ok (api->CreateEnv (ORT_LOGGING_LEVEL_ERROR, "timewind", &env))) return false;
+        auto& rt = runtime();
+        if (rt.api == nullptr && ! rt.failed)
+        {
+            // Loaded once per process and kept (never FreeLibrary'd).
+            rt.failed = true;
+            auto* lib = new juce::DynamicLibrary();
+            if (! lib->open (dir.getChildFile (libName).getFullPathName())) { setStatus ("HAND ENGINE WON'T LOAD"); return false; }
+            using GetBase = const OrtApiBase* (ORT_API_CALL*) ();
+            auto getBase = (GetBase) lib->getFunction ("OrtGetApiBase");
+            if (getBase == nullptr) { setStatus ("HAND ENGINE BROKEN"); return false; }
+            rt.api = getBase()->GetApi (ORT_API_VERSION);
+            if (rt.api == nullptr) { setStatus ("HAND ENGINE TOO OLD"); return false; }
+            api = rt.api;
+            if (! ok (api->CreateEnv (ORT_LOGGING_LEVEL_FATAL, "timewind", &rt.env))) { rt.api = nullptr; return false; }
+            rt.failed = false;
+        }
+        if (rt.api == nullptr || rt.env == nullptr) { setStatus ("HAND ENGINE UNAVAILABLE"); return false; }
+        api = rt.api;
+        env = rt.env;
         OrtSessionOptions* so = nullptr;
         if (! ok (api->CreateSessionOptions (&so))) return false;
         ign (api->SetIntraOpNumThreads (so, 1));   // stay light next to the audio thread
@@ -144,24 +161,29 @@ private:
         if (! s2) return false;
         if (! ok (api->CreateCpuMemoryInfo (OrtArenaAllocator, OrtMemTypeDefault, &mem))) return false;
         buildAnchors();
-        status = "HAND SKELETON READY";
+        setStatus ("HAND SKELETON READY");
         return true;
     }
 
     bool makeSession (const juce::File& f, OrtSessionOptions* so, OrtSession*& out)
     {
         juce::MemoryBlock mb;
-        if (! f.loadFileAsData (mb)) { status = "HAND MODEL UNREADABLE"; return false; }
+        if (! f.loadFileAsData (mb)) { setStatus ("HAND MODEL UNREADABLE"); return false; }
         return ok (api->CreateSessionFromArray (env, mb.getData(), mb.getSize(), so, &out));
     }
 
     bool ok (OrtStatus* st)
     {
         if (st == nullptr) return true;
-        status = "HAND ENGINE: " + juce::String (api->GetErrorMessage (st)).substring (0, 60).toUpperCase();
+        setStatus ("HAND ENGINE: " + juce::String (api->GetErrorMessage (st)).substring (0, 60).toUpperCase());
         api->ReleaseStatus (st);
         return false;
     }
+
+    void setStatus (const juce::String& s) { const juce::SpinLock::ScopedLockType sl (statusLock); status = s; }
+
+    struct Runtime { const OrtApi* api = nullptr; OrtEnv* env = nullptr; bool failed = false; };
+    static Runtime& runtime() { static Runtime r; return r; } // shared by every instance, set up on the message thread
 
     // Runs one model with a single NHWC float input; copies every output into outs.
     bool runModel (OrtSession* s, int size, std::vector<std::vector<float>>& outs, int numOuts)
@@ -175,7 +197,13 @@ private:
         std::vector<OrtValue*> outVals ((size_t) numOuts, nullptr);
         const bool good = ok (api->Run (s, nullptr, &inName, (const OrtValue* const*) &input, 1, names4, (size_t) numOuts, outVals.data()));
         api->ReleaseValue (input);
-        if (! good) return false;
+        if (! good)
+        {
+            for (auto* v : outVals) if (v != nullptr) api->ReleaseValue (v);
+            if (++failures > 20) { enabled.store (false); setStatus ("HAND SKELETON OFF (ENGINE ERRORS)"); }
+            return false;
+        }
+        failures = 0;
         outs.resize ((size_t) numOuts);
         for (int k = 0; k < numOuts; ++k)
         {
@@ -422,18 +450,22 @@ private:
             if (threadShouldExit()) break;
             if (! takePending()) continue;
             const auto t0 = juce::Time::getMillisecondCounterHiRes();
-            track();
+            if (! enabled.load()) { setAbsent(); continue; }
+            try { track(); } catch (...) { enabled.store (false); setStatus ("HAND SKELETON OFF (ERROR)"); }
             inferenceMs.store ((float) (juce::Time::getMillisecondCounterHiRes() - t0));
         }
     }
 
-    juce::DynamicLibrary lib;
     const OrtApi* api = nullptr;
     OrtEnv* env = nullptr;
     OrtSession* palm = nullptr;
     OrtSession* marks = nullptr;
     OrtMemoryInfo* mem = nullptr;
-    bool ready = false, triedLoad = false;
+    std::atomic<bool> ready { false };
+    bool triedLoad = false;
+    int failures = 0;
+    mutable juce::SpinLock statusLock;
+    juce::String status;
 
     juce::WaitableEvent wake;
     juce::SpinLock frameLock, poseLock;

@@ -77,7 +77,12 @@ system up and down. Hand control needs CAM ON in the camera module. Assignments 
 
 ## Presets
 
-Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine, Hand Garden (camera play), Airport Tapes, Warped Cassette, Hand Weather (camera: hand height sweeps the sequence filter, left/right sweeps the drone, a quick wave opens it up).
+The preset menu is grouped from calm to strange. Every preset stays in key with itself, so you can move from a soundbath to plucks to something weird without clashes.
+
+* **Soundbath** (no plucks, all breath): Drift Cathedral, Singing Bowls, Low Tide Breathing, Cathedral Ghosts, Airport Tapes.
+* **Plucks + sequences**: Mirror Sequence, Berlin Night Drive, Glass Harp, Kalimba Rain, Toy Piano Ghost, Black Tide, Pulse Engine.
+* **Weird**: Warped Cassette, Insect Choir, Broken Radio Prayer, Gravity Well, Clockwork Jellyfish.
+* **Hands (camera)**: Hand Garden, Hand Weather, Puppet Strings (each gesture plays the next note), Theremin Fog (hand height is pitch, pinch to sound it).
 
 ## Building
 

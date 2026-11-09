@@ -156,16 +156,18 @@ void SlimeLookAndFeel::drawButtonBackground (juce::Graphics& g, juce::Button& b,
 {
     auto r = b.getLocalBounds().toFloat().reduced (0.5f);
     const bool lit = over || down || b.getToggleState();
+    const bool accent = b.getProperties()["accent"];
     g.setColour (lit ? acid : juce::Colours::black);
     g.fillRect (r);
-    g.setColour (lit ? acid : juce::Colour (0x40ffffff));
+    g.setColour (lit || accent ? acid : juce::Colour (0x40ffffff));
     g.drawRect (r, 1.0f);
 }
 
 void SlimeLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, bool over, bool down)
 {
     const bool lit = over || down || b.getToggleState();
-    g.setColour (lit ? juce::Colours::black : fg);
+    const bool accent = b.getProperties()["accent"];
+    g.setColour (lit ? juce::Colours::black : accent ? acid : fg);
     g.setFont (dwui::font (12.0f).withExtraKerningFactor (0.08f));
     g.drawText (b.getButtonText(), b.getLocalBounds(), juce::Justification::centred);
 }
@@ -359,7 +361,7 @@ void CameraView::paint (juce::Graphics& g)
     {
         g.setColour (fg3);
         g.setFont (dwui::font (11.0f));
-        g.drawFittedText (proc.camera.status.toLowerCase(), screen.reduced (6.0f).toNearestInt(), juce::Justification::centred, 3);
+        g.drawFittedText (proc.camera.status.toLowerCase() + "\nclick here for full screen", screen.reduced (6.0f).toNearestInt(), juce::Justification::centred, 3);
     }
 }
 
@@ -630,7 +632,8 @@ void FullCameraView::paint (juce::Graphics& g)
             g.setColour (acid); g.fillRect (x, y + 17.0f, bw * juce::jlimit (0.0f, 1.0f, vals[k]), 3.0f);
         }
         g.setColour (fg3); g.setFont (dwui::mono (11.0f));
-        const juce::String hs = ! ht.isReady() ? ht.status.toLowerCase()
+        const juce::String hs = ! ht.enabled.load() ? juce::String ("hand skeleton: off (BONES switch)")
+                              : ! ht.isReady() ? ht.getStatus().toLowerCase()
                               : ht.present.load() ? juce::String::formatted ("hand skeleton: tracking  %.0f ms", ht.inferenceMs.load())
                                                   : juce::String ("hand skeleton: show your hand");
         g.drawText (hs, (int) (pic.getX() + 4 * (bw + 24.0f)), (int) y, 300, 22, juce::Justification::left);
@@ -701,7 +704,7 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
         { M_DREAM, "Dream", "loops of unequal length", 1, 1100, 170, 2,
           { { "dream.chord", "CHORD", 1 }, { "dream.rate", "SPEED", 0 }, { "dream.tone", "TONE", 0 }, { "dream.warp", "WARP", 0 }, { "dream.level", "LEVEL", 0 } } },
         { M_CAMERA, "Hand", "webcam tracking", 1, 1270, 230, 1,
-          { { "cam.on", "CAM", 2, 16, 160 }, { "cam.sens", "SENS", 0, 89, 160 }, { "cam.slew", "SMOOTH", 0, 162, 160 } } },
+          { { "cam.on", "CAM", 2, 6, 160 }, { "cam.hands", "BONES", 2, 62, 160 }, { "cam.sens", "SENS", 0, 118, 160 }, { "cam.slew", "SMOOTH", 0, 172, 160 } } },
         // rack row 2
         { M_ENV1, "Env 1", "adsr", 2, 0, 130, 2, { { "env1.a", "ATTACK", 0 }, { "env1.d", "DECAY", 0 }, { "env1.s", "SUSTAIN", 0 }, { "env1.r", "RELEASE", 0 } } },
         { M_ENV2, "Env 2", "adsr", 2, 130, 130, 2, { { "env2.a", "ATTACK", 0 }, { "env2.d", "DECAY", 0 }, { "env2.s", "SUSTAIN", 0 }, { "env2.r", "RELEASE", 0 } } },
@@ -750,12 +753,30 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
 
     cameraView = std::make_unique<CameraView> (proc);
     cameraView->setBounds (1270 + 10, rowTop (1) + 40, 210, 112);
+    cameraView->onClick = [this] { openFullCamera (true); };   // click the little picture to go full screen
+    cameraView->setMouseCursor (juce::MouseCursor::PointingHandCursor);
+    cameraView->setTooltip ("Click for the full-screen camera");
     addAndMakeVisible (*cameraView);
 
     // Header
-    for (int i = 0; i < proc.getNumPrograms(); ++i) presetBox.addItem (proc.getProgramName (i), i + 1);
-    presetBox.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
-    presetBox.onChange = [this] { proc.setCurrentProgram (presetBox.getSelectedId() - 1); refreshPatch(); };
+    {
+        juce::String group;
+        for (int i = 0; i < DriftwerkProcessor::getNumPresets(); ++i)
+        {
+            if (DriftwerkProcessor::getPresetGroup (i) != group)
+            {
+                group = DriftwerkProcessor::getPresetGroup (i);
+                presetBox.addSectionHeading (group);
+            }
+            presetBox.addItem (DriftwerkProcessor::getPresetName (i), i + 1);
+        }
+    }
+    presetBox.setSelectedId (proc.getCurrentPreset() + 1, juce::dontSendNotification);
+    presetBox.onChange = [this]
+    {
+        const int id = presetBox.getSelectedId();
+        if (id > 0) { proc.loadPreset (id - 1); refreshPatch(); }
+    };
     addAndMakeVisible (presetBox);
     randomButton.onClick = [this] { proc.randomisePatch(); refreshPatch(); };
     clearButton.onClick = [this] { for (int i = 0; i < NumIns; ++i) proc.disconnect (i); refreshPatch(); };
@@ -769,6 +790,7 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     addAndMakeVisible (*cables);
 
     fullButton.onClick = [this] { openFullCamera (true); };
+    fullButton.getProperties().set ("accent", true);
     addAndMakeVisible (fullButton);
     fullCam = std::make_unique<FullCameraView> (proc, *slime);
     fullCam->onClose = [this] { openFullCamera (false); };
@@ -1123,8 +1145,8 @@ void MainView::timerCallback()
         const auto ps = proc.getPatchString();
         if (ps != lastPatch) { lastPatch = ps; cables->repaint(); }
     }
-    if (presetBox.getSelectedId() != proc.getCurrentProgram() + 1)
-        presetBox.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
+    if (presetBox.getSelectedId() != proc.getCurrentPreset() + 1)
+        presetBox.setSelectedId (proc.getCurrentPreset() + 1, juce::dontSendNotification);
 
     for (auto& sl : sliders)
     {
