@@ -78,6 +78,7 @@ int main (int argc, char** argv)
     {
         std::unique_ptr<juce::AudioProcessorEditor> ed (proc.createEditor());
         ed->setVisible (true);
+        if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get())) de->refreshNow();
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         juce::File png (outDir + "/editor_" + juce::String (program) + ".png");
         png.deleteFile();

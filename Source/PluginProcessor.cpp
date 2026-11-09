@@ -47,6 +47,7 @@ struct Preset
     const char* name;
     const char* patch;
     std::vector<std::pair<const char*, float>> values; // real (un-normalised) values
+    const char* mods = nullptr;                         // knob modulation, see setModFromString
 };
 
 const std::vector<Preset>& presets()
@@ -83,7 +84,8 @@ const std::vector<Preset>& presets()
           "lfo2.out>vco2.pwm;vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;cam.x>vcf2.cv1;"
           "cam.trig>env2.gate;env2.out>vcf2.cv2;vcf2.out>out.in2",
           { { "cam.on", 1 }, { "vcf1.cv2", 0.6f }, { "vcf2.cv1", 0.55f }, { "vcf2.cv2", 0.5f },
-            { "env2.a", 0.05f }, { "env2.d", 2.5f }, { "env2.s", 0.0f }, { "env2.r", 3.0f } } },
+            { "env2.a", 0.05f }, { "env2.d", 2.5f }, { "env2.s", 0.0f }, { "env2.r", 3.0f } },
+          "hall.mix<cam.y@0.45;echo.fb<cam.mot@0.35;arp.mutate<cam.mot@0.5" },
     };
     return list;
 }
@@ -108,6 +110,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     ch ("clk.div", "Clock Division", clockDivNames, 3);
     fl ("clk.bpm", "Clock BPM (no host)", NRange (40.0f, 200.0f, 0.1f), 100.0f);
     bo ("clk.run", "Clock Run", true);
+    fl ("out.tune", "Master Tune", NRange (-12.0f, 12.0f), 0.0f);
     // Random arpeggiator
     ch ("arp.scale", "Arp Scale", scaleNames, 0);
     ps.push_back (std::make_unique<AudioParameterInt> (ParameterID { "arp.root", 1 }, "Root Note", 24, 60, 36,
@@ -218,7 +221,53 @@ DriftwerkProcessor::DriftwerkProcessor()
     for (int i = 0; i < 6; ++i)
         droneOsc[i].phase = (droneRng.next() * 0.5 + 0.5);
 
+    for (auto* param : getParameters())
+        if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (param))
+        {
+            paramIndexMap[rp->getParameterID().toStdString()] = (int) paramList.size();
+            paramList.push_back (rp);
+            mods.push_back (std::make_unique<ModSlot>());
+        }
+    effective.resize (paramList.size(), 0.0f);
+
     cameraPoller = std::make_unique<CameraPoller> (*this);
+}
+
+int DriftwerkProcessor::paramIndex (const juce::String& id) const
+{
+    const auto it = paramIndexMap.find (id.toStdString());
+    return it == paramIndexMap.end() ? -1 : it->second;
+}
+
+juce::String DriftwerkProcessor::getModString() const
+{
+    juce::StringArray items;
+    for (size_t k = 0; k < paramList.size(); ++k)
+    {
+        const int src = mods[k]->source.load();
+        if (src >= 0 && src < NumOuts)
+            items.add (paramList[k]->getParameterID() + "<" + outDefs[src].id + "@" + juce::String (mods[k]->depth.load(), 3));
+    }
+    return items.joinIntoString (";");
+}
+
+void DriftwerkProcessor::setModFromString (const juce::String& s)
+{
+    for (auto& m : mods) m->source.store (-1);
+    juce::StringArray items;
+    items.addTokens (s, ";", "");
+    for (auto& item : items)
+    {
+        const int pi = paramIndex (item.upToFirstOccurrenceOf ("<", false, false).trim());
+        const auto rest = item.fromFirstOccurrenceOf ("<", false, false);
+        const int src = findOut (rest.upToFirstOccurrenceOf ("@", false, false).trim().toRawUTF8());
+        const float depth = rest.fromFirstOccurrenceOf ("@", false, false).getFloatValue();
+        if (pi >= 0 && src >= 0)
+        {
+            mods[(size_t) pi]->depth.store (juce::jlimit (-1.0f, 1.0f, depth));
+            mods[(size_t) pi]->source.store (src);
+        }
+    }
 }
 
 DriftwerkProcessor::~DriftwerkProcessor()
@@ -357,8 +406,21 @@ void DriftwerkProcessor::arpClock()
 
 void DriftwerkProcessor::updateBlockParams()
 {
-    auto f = [this] (const char* id) { return apvts.getRawParameterValue (id)->load(); };
-    auto i = [this] (const char* id) { return (int) std::lround (apvts.getRawParameterValue (id)->load()); };
+    // Apply knob modulation once per block: effective = knob position + depth * source.
+    for (size_t k = 0; k < paramList.size(); ++k)
+    {
+        auto* rp = paramList[k];
+        float n = rp->getValue();
+        const int src = mods[k]->source.load (std::memory_order_relaxed);
+        if (src >= 0 && src < NumOuts)
+        {
+            n = juce::jlimit (0.0f, 1.0f, n + mods[k]->depth.load (std::memory_order_relaxed) * outs[(size_t) src]);
+            mods[k]->now.store (n, std::memory_order_relaxed);
+        }
+        effective[k] = rp->convertFrom0to1 (n);
+    }
+    auto f = [this] (const char* id) { const int k = paramIndex (id); return k >= 0 ? effective[(size_t) k] : 0.0f; };
+    auto i = [&f] (const char* id) { return (int) std::lround (f (id)); };
 
     p.clkDiv = i ("clk.div"); p.clkBpm = f ("clk.bpm"); p.clkRun = f ("clk.run") > 0.5f;
     p.scale = i ("arp.scale"); p.root = i ("arp.root"); p.range = i ("arp.range"); p.length = i ("arp.len");
@@ -382,6 +444,7 @@ void DriftwerkProcessor::updateBlockParams()
     p.echoTime = echoDivBeats[ed] > 0.0 ? (float) (echoDivBeats[ed] * samplesPerBeat / sr) : f ("echo.ms") * 0.001f;
     p.echoTime = juce::jlimit (0.02f, 2.4f, p.echoTime);
     p.camSlew = f ("cam.slew");
+    p.tune = f ("out.tune");
     p.revSize = f ("hall.size"); p.revDamp = f ("hall.damp"); p.revMix = f ("hall.mix");
 
     env1.set (p.e1a, p.e1d, p.e1s, p.e1r, (float) sr);
@@ -451,7 +514,7 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
         outs[O_ARP_RND] = arp.rndOut;
     }
 
-    const float baseNote = (float) (p.root + midiTranspose);
+    const float baseNote = (float) (p.root + midiTranspose) + p.tune;
 
     // ---- DRONE BANK
     {
@@ -645,12 +708,14 @@ void DriftwerkProcessor::setCurrentProgram (int index)
             rp->setValueNotifyingHost (rp->convertTo0to1 (value));
 
     setPatchFromString (pr.patch != nullptr ? pr.patch : defaultPatch);
+    setModFromString (pr.mods != nullptr ? pr.mods : "");
 }
 
 void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
 {
     auto state = apvts.copyState();
     state.setProperty ("patch", getPatchString(), nullptr);
+    state.setProperty ("mods", getModString(), nullptr);
     state.setProperty ("program", currentProgram, nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -665,6 +730,7 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
         {
             apvts.replaceState (state);
             setPatchFromString (state.getProperty ("patch", defaultPatch).toString());
+            setModFromString (state.getProperty ("mods", {}).toString());
             currentProgram = state.getProperty ("program", 0);
         }
     }

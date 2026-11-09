@@ -23,6 +23,23 @@ public:
 };
 
 //==============================================================================
+// Rotary knob that opens the modulation menu on right-click.
+class ModSlider : public juce::Slider
+{
+public:
+    ModSlider() : juce::Slider (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox) {}
+    std::function<void()> onRightClick;
+    int paramIndex = -1;
+    void mouseDown (const juce::MouseEvent& e) override
+    {
+        if (e.mods.isPopupMenu()) { if (onRightClick) onRightClick(); return; }
+        juce::Slider::mouseDown (e);
+    }
+    void mouseDrag (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu()) juce::Slider::mouseDrag (e); }
+    void mouseUp (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu()) juce::Slider::mouseUp (e); }
+};
+
+//==============================================================================
 class JackComponent : public juce::Component
 {
 public:
@@ -110,7 +127,11 @@ private:
     std::vector<bool> outputPlatesDark;
 
     RackLookAndFeel lnf;
-    std::vector<std::unique_ptr<juce::Slider>> sliders;
+    std::vector<std::unique_ptr<ModSlider>> sliders;
+    void showModMenu (ModSlider& s);
+public:
+    void refreshNow() { timerCallback(); } // used by the offline render tool
+private:
     std::vector<std::unique_ptr<juce::ComboBox>> combos;
     std::vector<std::unique_ptr<juce::ToggleButton>> toggles;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sliderAtt;

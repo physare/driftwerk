@@ -2,6 +2,7 @@
 
 #include <juce_audio_processors/juce_audio_processors.h>
 #include <atomic>
+#include <unordered_map>
 #include "DSP.h"
 #include "Patch.h"
 #include "CameraTracker.h"
@@ -46,6 +47,14 @@ public:
     void disconnect (int in) { if (in >= 0 && in < dw::NumIns) patch[(size_t) in].store (-1); }
     void randomisePatch();
 
+    // Knob modulation: any parameter can follow a jack output (hand, motion, LFO...).
+    struct ModSlot { std::atomic<int> source { -1 }; std::atomic<float> depth { 0.5f }; std::atomic<float> now { -1.0f }; };
+    std::vector<std::unique_ptr<ModSlot>> mods;          // one per parameter, same order as paramList
+    std::vector<juce::RangedAudioParameter*> paramList;
+    int paramIndex (const juce::String& id) const;
+    juce::String getModString() const;
+    void setModFromString (const juce::String& s);
+
     juce::AudioProcessorValueTreeState apvts;
 
     // UI feedback (written by audio thread, read by the editor).
@@ -60,6 +69,8 @@ public:
 private:
     void renderSample (float& outL, float& outR);
     void updateBlockParams();
+    std::unordered_map<std::string, int> paramIndexMap;
+    std::vector<float> effective;
     float in (int jack, float normalled = 0.0f) const
     {
         const int src = patchCache[(size_t) jack];
@@ -149,7 +160,7 @@ private:
         float lvl1 = 0.7f, lvl2 = 0.6f, pan1 = 0, pan2 = 0, vol = 0.5f, ens = 0.4f;
         float echoTime = 0.3f, echoFb = 0.5f, echoMix = 0.3f, echoWow = 0.3f;
         float revSize = 0.75f, revDamp = 0.5f, revMix = 0.4f;
-        float camSlew = 0.3f;
+        float camSlew = 0.3f, tune = 0.0f;
     } p;
 
     double sr = 44100.0;

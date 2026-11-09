@@ -29,6 +29,14 @@ The interface is a 90s-style modular rack with real drag-and-drop patch cables.
 * The patch is saved with your Ableton set and with presets.
 * MIDI notes transpose the whole system (C3 = no transpose), but it plays on its own without any MIDI.
 
+## Playing knobs with your hands
+
+Right-click any knob and pick Hand X, Hand Y or Hand motion (or an LFO, S&H, ENV 2 or the arp's random output),
+then pick a depth. Negative depths turn the knob the other way. An amber arc shows the range the knob can move
+through and a bright dot shows where it is right now. Choose "Nothing" to go back to manual.
+The CLOCK module's TUNE knob shifts the pitch of everything, so assigning it to Hand Y lets you bend the whole
+system up and down. Hand control needs CAM ON in the camera module. Assignments are saved with your set.
+
 ## Presets
 
 Drift Cathedral, Mirror Sequence, Black Tide, Pulse Engine, Hand Weather (camera: hand height sweeps the sequence filter, left/right sweeps the drone, a quick wave opens it up).

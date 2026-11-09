@@ -113,6 +113,26 @@ void RackLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w, 
     juce::Path ptr;
     ptr.addRoundedRectangle (-1.4f, -kr * 0.98f, 2.8f, kr * 0.62f, 1.0f);
     g.fillPath (ptr, juce::AffineTransform::rotation (a).translated (c.x, c.y));
+
+    // Modulation ring: amber arc over the reachable range, bright dot at the live value.
+    if ((int) s.getProperties().getWithDefault ("modSrc", -1) >= 0)
+    {
+        const float depth = s.getProperties()["modDepth"];
+        const float now = s.getProperties()["modNow"];
+        const float from = juce::jlimit (0.0f, 1.0f, depth >= 0 ? pos : pos + depth);
+        const float to = juce::jlimit (0.0f, 1.0f, depth >= 0 ? pos + depth : pos);
+        const float rr = radius * 1.12f;
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, rr, rr, 0.0f, start + from * (end - start), start + to * (end - start), true);
+        g.setColour (juce::Colour (0xffffb43a).withAlpha (0.85f));
+        g.strokePath (arc, juce::PathStrokeType (2.5f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+        if (now >= 0.0f)
+        {
+            const float na = start + now * (end - start);
+            g.setColour (juce::Colour (0xffffe0a0));
+            g.fillEllipse (c.x + rr * std::sin (na) - 3.0f, c.y - rr * std::cos (na) - 3.0f, 6.0f, 6.0f);
+        }
+    }
 }
 
 void RackLookAndFeel::drawComboBox (juce::Graphics& g, int w, int h, bool, int, int, int, int, juce::ComboBox&)
@@ -388,8 +408,8 @@ DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p)
                        yellow = 0xffe2b12b, grey = 0xff9a9a9a, purple = 0xff7d52b0;
     // module, title, subtitle, row, x, w, cols, dark, accent, controls
     specs = {
-        { M_CLOCK,  "CLOCK", "MASTER TIME", 0, 0, 110, 1, true, red,
-          { { "clk.div", "RATE", 1 }, { "clk.bpm", "BPM", 0 }, { "clk.run", "RUN", 2 } } },
+        { M_CLOCK,  "CLOCK", "TIME + TUNE", 0, 0, 110, 1, true, red,
+          { { "clk.div", "RATE", 1 }, { "clk.bpm", "BPM", 0 }, { "clk.run", "RUN", 2 }, { "out.tune", "TUNE", 0 } } },
         { M_ARP,    "RANDOM ARP", "SHIFT REGISTER SEQ", 0, 110, 250, 3, false, red,
           { { "arp.scale", "SCALE", 1 }, { "arp.root", "ROOT", 0 }, { "arp.range", "RANGE", 0 },
             { "arp.len", "LENGTH", 0 }, { "arp.density", "DENSITY", 0 }, { "arp.mutate", "MUTATE", 0 },
@@ -516,7 +536,10 @@ void DriftwerkEditor::buildModule (int specIndex)
 
         if (cd.kind == 0)
         {
-            auto s = std::make_unique<juce::Slider> (juce::Slider::RotaryHorizontalVerticalDrag, juce::Slider::NoTextBox);
+            auto s = std::make_unique<ModSlider>();
+            s->paramIndex = proc.paramIndex (cd.param);
+            auto* raw = s.get();
+            s->onRightClick = [this, raw] { showModMenu (*raw); };
             s->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
             s->getProperties().set ("dark", sp.dark);
             s->getProperties().set ("accent", (juce::int64) sp.accent);
@@ -606,8 +629,8 @@ void DriftwerkEditor::paint (juce::Graphics& g)
     g.drawText ("MODULAR SYNTHESIZER SYSTEM  /  MODEL 94", 222, 4, 320, headerH - 8, juce::Justification::centredLeft);
     g.setColour (inkLight.withAlpha (0.55f));
     g.setFont (panelFont (10.0f, false));
-    g.drawText ("drag jack to jack to patch  /  right-click a jack to unplug",
-                545, 4, 340, headerH - 8, juce::Justification::centredLeft);
+    g.drawText ("drag jack to jack to patch  /  right-click a jack to unplug  /  right-click a knob to play it by hand",
+                480, 4, 400, headerH - 8, juce::Justification::centredLeft);
 
     // Rails
     auto drawRail = [&] (int y)
@@ -717,6 +740,50 @@ void DriftwerkEditor::paint (juce::Graphics& g)
         }
 }
 
+void DriftwerkEditor::showModMenu (ModSlider& s)
+{
+    if (s.paramIndex < 0) return;
+    auto& slot = *proc.mods[(size_t) s.paramIndex];
+    const int current = slot.source.load();
+    const float depth = slot.depth.load();
+
+    struct Src { int out; const char* name; };
+    const Src handSources[] { { O_CAM_X, "Hand X  (left / right)" }, { O_CAM_Y, "Hand Y  (up / down)" },
+                              { O_CAM_MOTION, "Hand motion  (how much you move)" } };
+    const Src otherSources[] { { O_LFO1, "LFO 1" }, { O_LFO2, "LFO 2" }, { O_SNH, "S&H random" },
+                               { O_ENV2, "ENV 2" }, { O_ARP_RND, "Arp random" } };
+
+    juce::PopupMenu m;
+    m.addSectionHeader ("Control this knob with...");
+    for (auto& h : handSources) m.addItem (1000 + h.out, h.name, true, current == h.out);
+    juce::PopupMenu others;
+    for (auto& o : otherSources) others.addItem (1000 + o.out, o.name, true, current == o.out);
+    m.addSubMenu ("Other modulators", others);
+    m.addItem (1, "Nothing (manual only)", current >= 0, current < 0);
+    m.addSeparator();
+    m.addSectionHeader ("Depth");
+    const float depths[] { 0.15f, 0.3f, 0.5f, 1.0f, -0.3f, -0.5f, -1.0f };
+    for (int k = 0; k < 7; ++k)
+        m.addItem (100 + k, (depths[k] > 0 ? "+" : "") + juce::String (juce::roundToInt (depths[k] * 100)) + "%",
+                   true, std::abs (depth - depths[k]) < 0.01f);
+
+    juce::Component::SafePointer<ModSlider> safe (&s);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&s),
+        [this, safe, depths] (int r)
+        {
+            if (r == 0 || safe == nullptr) return;
+            auto& sl = *proc.mods[(size_t) safe->paramIndex];
+            if (r == 1) sl.source.store (-1);
+            else if (r >= 1000) sl.source.store (r - 1000);
+            else if (r >= 100 && r < 107)
+            {
+                sl.depth.store (depths[r - 100]);
+                if (sl.source.load() < 0) sl.source.store (O_CAM_Y); // picking a depth first defaults to hand height
+            }
+            proc.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+        });
+}
+
 void DriftwerkEditor::resized()
 {
     cables->setBounds (getLocalBounds());
@@ -809,6 +876,24 @@ void DriftwerkEditor::timerCallback()
     }
     if (presetBox.getSelectedId() != proc.getCurrentProgram() + 1)
         presetBox.setSelectedId (proc.getCurrentProgram() + 1, juce::dontSendNotification);
+
+    // Modulated knobs: refresh their live position ring.
+    for (auto& sl : sliders)
+    {
+        if (sl->paramIndex < 0) continue;
+        auto& slot = *proc.mods[(size_t) sl->paramIndex];
+        const int src = slot.source.load();
+        const float now = src >= 0 ? slot.now.load() : -1.0f;
+        auto& props = sl->getProperties();
+        if ((int) props["modSrc"] != src || std::abs ((float) props["modNow"] - now) > 0.004f
+            || std::abs ((float) props["modDepth"] - slot.depth.load()) > 0.001f)
+        {
+            props.set ("modSrc", src);
+            props.set ("modNow", now);
+            props.set ("modDepth", slot.depth.load());
+            sl->repaint();
+        }
+    }
 
     for (auto& j : outJacks)
     {
