@@ -137,7 +137,7 @@ system up and down. Hand control needs CAM ON in the camera module.
 
 ## Presets
 
-The preset menu is grouped from calm to strange. Every preset stays in key with itself, so you can move from a soundbath to plucks to something weird without clashes.
+The preset menu is grouped from calm to strange. All the built-in presets play at about the same loudness, so changing preset never jumps in volume. Every preset stays in key with itself, so you can move from a soundbath to plucks to something weird without clashes.
 
 **Your own presets**: click **SAVE** next to the preset menu and pick "Save as a new preset...", give it a name, and it appears under **MY PRESETS** at the bottom of the menu. With one of yours playing, SAVE can also save over it or delete it, and "Show the presets folder" opens where they live (AppData\Roaming\Timewind\Presets on Windows). A preset keeps everything: the knobs, the patch, the sequence, the drum pattern, your GRAIN sound and your WORDS recordings.
 

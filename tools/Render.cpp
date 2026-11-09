@@ -280,7 +280,15 @@ int main (int argc, char** argv)
         }
         ed->setSize (MainView::designW, MainView::designH);
         if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get()))
-            for (int k = 0; k < 20; ++k) de->refreshNow();          // let the animations settle
+        {
+            // Keep playing while the screen refreshes, so the moving displays have something to show.
+            juce::AudioBuffer<float> tmp (2, block); juce::MidiBuffer mb;
+            for (int k = 0; k < 300; ++k)
+            {
+                for (int b = 0; b < 3; ++b) { tmp.clear(); proc.processBlock (tmp, mb); }
+                de->refreshNow();
+            }
+        }
         if (auto* env = std::getenv ("DW_FS"))
             if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get()))
             {

@@ -82,6 +82,21 @@ public:
     MainView& view;
 };
 
+// A small moving trace of one jack output (an LFO, an envelope, the S&H): the last few seconds.
+class MiniTrace : public juce::Component
+{
+public:
+    MiniTrace (DriftwerkProcessor& p, int output, bool bipolarSignal, int everyNthFrame)
+        : proc (p), out (output), bipolar (bipolarSignal), every (everyNthFrame) { setInterceptsMouseClicks (false, false); }
+    void paint (juce::Graphics&) override;
+    void tick();                                       // called by the UI timer
+    static constexpr int N = 96;
+    DriftwerkProcessor& proc;
+    int out; bool bipolar; int every, frame = 0, head = 0;
+    float hist[N] {};
+    bool moving = false;
+};
+
 class ScopeComponent : public juce::Component
 {
 public:
@@ -407,6 +422,7 @@ private:
     std::unique_ptr<BassView> bassView;
     std::unique_ptr<LayersPanel> layers;
     std::unique_ptr<MorphPanel> morph;
+    std::vector<std::unique_ptr<MiniTrace>> traces;
     juce::TextButton morphButton { "MORPH" };
     juce::Rectangle<int> morphBar;                         // under MORPH: where the A-B fader is now
     float shownMorphPos = -1.0f;

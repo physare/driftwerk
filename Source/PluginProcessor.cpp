@@ -3234,6 +3234,23 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
 }
 
 //==============================================================================
+// Loudness: how much each preset's master volume is trimmed (dB) so they all play about as
+// loud as each other (measured over 40 s, aiming at -16 LUFS). Presets not listed are near enough.
+const std::pair<const char*, float> presetTrims[] {
+    { "Singing Bowls", -3.0f }, { "Low Tide Breathing", 6.0f }, { "Airport Tapes", -1.5f },
+    { "Berlin Night Drive", 2.5f }, { "Glass Harp", 3.5f }, { "Kalimba Rain", 5.5f },
+    { "Toy Piano Ghost", 1.5f }, { "Black Tide", 3.5f }, { "Warped Cassette", -2.0f },
+    { "Insect Choir", 6.0f }, { "Gravity Well", 3.0f }, { "Choir Of Rooms", -3.5f },
+    { "Organ Sunday", 1.0f }, { "Glass Weather", 1.0f }, { "String Machine Dawn", 1.5f },
+    { "Rain Stabs", 1.5f }, { "Bowed Iron Creep", 2.5f }, { "Wandering Hymn", -1.5f },
+    { "Postcard Loop", 2.0f }, { "Orbiting Bells", 3.5f }, { "Reverse Garden", 1.5f },
+    { "Slime Choir", -1.5f }, { "Heartbeat Moss", 1.0f }, { "Lazy Tape Afternoon", -1.5f },
+    { "Rain on the Organism", 4.5f }, { "Memory Hall", 1.0f }, { "Night Creatures", 2.0f },
+    { "Educational Film", -3.5f }, { "Broken Tape Break", -3.5f }, { "Drill Garden", -3.5f },
+    { "Jungle Memory", -4.0f }, { "Wavetable Choir", 1.0f }, { "Puppet Strings", 1.5f },
+    { "Theremin Fog", 3.5f }
+};
+
 int DriftwerkProcessor::getNumPresets() { return (int) presets().size(); }
 
 juce::String DriftwerkProcessor::getPresetName (int index)
@@ -3305,6 +3322,14 @@ void DriftwerkProcessor::loadPreset (int index)
     for (auto& [id, value] : pr.values)
         if (auto* rp = apvts.getParameter (id))
             target[id] = rp->convertTo0to1 (value);
+    for (const auto& [name, db] : presetTrims)
+        if (juce::String (name) == pr.name)
+            if (auto* vol = apvts.getParameter ("out.vol"))
+            {
+                const auto it = target.find ("out.vol");
+                const float base = it != target.end() ? vol->convertFrom0to1 (it->second) : vol->convertFrom0to1 (vol->getDefaultValue());
+                target["out.vol"] = vol->convertTo0to1 (juce::jlimit (-40.0f, 6.0f, base + db));
+            }
     // Your own sound stays loaded in GRAIN when you change presets.
     if (auto* src = apvts.getParameter ("grain.src"))
         if ((int) std::lround (apvts.getRawParameterValue ("grain.src")->load()) == myFileSource && userSample != nullptr)

@@ -315,6 +315,48 @@ void CableLayer::paint (juce::Graphics& g)
 }
 
 //==============================================================================
+void MiniTrace::tick()
+{
+    if (++frame % every != 0) return;
+    const float v = juce::jlimit (-1.0f, 1.0f, proc.monitor[(size_t) out].load());
+    const float prev = hist[(head + N - 1) % N];
+    hist[head] = v;
+    head = (head + 1) % N;
+    // Only redraw while something is on the trace (a flat line stays as it is).
+    bool any = std::abs (v - prev) > 0.002f;
+    if (! any) { any = false; for (int k = 1; k < N && ! any; ++k) any = std::abs (hist[k] - hist[0]) > 0.002f; }
+    if (any || moving) repaint();
+    moving = any;
+}
+
+void MiniTrace::paint (juce::Graphics& g)
+{
+    const auto r = getLocalBounds().toFloat().reduced (0.5f);
+    g.setColour (juce::Colours::black);
+    g.fillRect (r);
+    g.setColour (rule);
+    g.drawRect (r, 1.0f);
+    const float base = bipolar ? r.getCentreY() : r.getBottom() - 5.0f;
+    const float span = bipolar ? r.getHeight() * 0.5f - 5.0f : r.getHeight() - 10.0f;
+    g.setColour (rule.withMultipliedAlpha (0.7f));
+    g.fillRect (r.getX() + 3.0f, base, r.getWidth() - 6.0f, 1.0f);
+    juce::Path trace;
+    float lastX = 0.0f, lastY = 0.0f;
+    for (int k = 0; k < N; ++k)
+    {
+        const float x = r.getX() + 4.0f + (r.getWidth() - 10.0f) * (float) k / (float) (N - 1);
+        const float y = base - hist[(head + k) % N] * span;
+        if (k == 0) trace.startNewSubPath (x, y); else trace.lineTo (x, y);
+        lastX = x; lastY = y;
+    }
+    g.setColour (acid.withAlpha (0.16f));
+    g.strokePath (trace, juce::PathStrokeType (3.5f));
+    g.setColour (acidDim);
+    g.strokePath (trace, juce::PathStrokeType (1.1f));
+    drawGlowDot (g, { lastX, lastY }, 1.0f, 2.0f);
+}
+
+//==============================================================================
 void ScopeComponent::paint (juce::Graphics& g)
 {
     auto r = getLocalBounds().toFloat();
@@ -842,6 +884,21 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     scope = std::make_unique<ScopeComponent> (proc);
     scope->setBounds (playRect.getX() + 12, t0 + 170, 200, 70);
     addAndMakeVisible (*scope);
+
+    // Live traces where the slow modules had empty panel: what each one is doing right now.
+    {
+        struct T { int out; bool bipolar; int every; juce::Rectangle<int> r; };
+        const int t1 = rowTop (1), t2 = rowTop (2);
+        const T defs[] { { O_SNH, true, 2, { 810, t1 + 138, 80, 74 } },
+                         { O_LFO1, true, 3, { 910, t1 + 178, 80, 62 } }, { O_LFO2, true, 3, { 1010, t1 + 178, 80, 62 } },
+                         { O_ENV1, false, 1, { 10, t2 + 186, 110, 56 } }, { O_ENV2, false, 1, { 140, t2 + 186, 110, 56 } } };
+        for (const auto& d : defs)
+        {
+            traces.push_back (std::make_unique<MiniTrace> (proc, d.out, d.bipolar, d.every));
+            traces.back()->setBounds (d.r);
+            addAndMakeVisible (*traces.back());
+        }
+    }
 
     bassView = std::make_unique<BassView> (proc);
     bassView->setBounds (1510, rowTop (3) + 172, 250, 200);
@@ -1524,6 +1581,7 @@ void MainView::timerCallback()
     }
     slime->repaint();
     scope->repaint();
+    for (auto& t : traces) t->tick();
     grainView->repaint();
     bassView->refresh();
     layers->refresh();
