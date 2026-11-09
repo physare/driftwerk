@@ -382,7 +382,7 @@ void SlimeView::paint (juce::Graphics& g)
     g.setImageResamplingQuality (juce::Graphics::highResamplingQuality);
     g.drawImage (img, r);
     // Soft bloom: the same frame, blurred by scaling, drawn faintly on top.
-    if (! frame.isValid()) frame = juce::Image (juce::Image::RGB, 75, 32, true);
+    if (! frame.isValid()) frame = juce::Image (juce::Image::RGB, 75, 32, true, juce::SoftwareImageType());
     {
         juce::Graphics fg_ (frame);
         fg_.setImageResamplingQuality (juce::Graphics::mediumResamplingQuality);

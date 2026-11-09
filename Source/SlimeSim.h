@@ -12,7 +12,7 @@ class SlimeSim
 {
 public:
     SlimeSim (int w, int h, int agents) : W (w), H (h), trail ((size_t) (w * h), 0.0f), tmp ((size_t) (w * h), 0.0f),
-                                          vein ((size_t) (w * h), 0.0f), image (juce::Image::RGB, w, h, true)
+                                          vein ((size_t) (w * h), 0.0f), image (juce::Image::RGB, w, h, true, juce::SoftwareImageType())
     {
         a.resize ((size_t) agents);
         coreX = W * 0.32f; coreY = H * 0.55f;

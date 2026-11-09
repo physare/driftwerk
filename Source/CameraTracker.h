@@ -94,7 +94,8 @@ public:
         return preview.isValid() ? preview.createCopy() : juce::Image();
     }
 
-    // Exposed for testing: analyse one frame.
+    // Exposed for testing: analyse one frame. Runs on the camera's own thread, so
+    // everything here stays in plain memory (no GPU images, no Graphics contexts).
     void analyse (const juce::Image& frame)
     {
         if (! frame.isValid()) return;
@@ -146,7 +147,7 @@ public:
         if (pc != pinchSeen) { pinchSeen = pc; triggerCount.fetch_add (1); }
 
         // Preview: mirrored grayscale with moving pixels tinted amber.
-        juce::Image img (juce::Image::RGB, W, H, false);
+        juce::Image img (juce::Image::RGB, W, H, false, juce::SoftwareImageType());
         {
             juce::Image::BitmapData dst (img, juce::Image::BitmapData::writeOnly);
             for (int y = 0; y < H; ++y)
@@ -157,7 +158,18 @@ public:
                     dst.setPixelColour (x, y, mask[i] ? juce::Colour (255, 180, 58) : juce::Colour (v, (juce::uint8) juce::jmin (255, v + 18), v));
                 }
         }
-        auto big = frame.rescaled (juce::jmin (480, frame.getWidth()), juce::jmin (360, frame.getHeight()), juce::Graphics::lowResamplingQuality);
+        // Colour copy for the hand skeleton and the full-screen view (nearest-neighbour).
+        const int bw = juce::jmin (480, frame.getWidth()), bh = juce::jmin (360, frame.getHeight());
+        juce::Image big (juce::Image::RGB, bw, bh, false, juce::SoftwareImageType());
+        {
+            juce::Image::BitmapData dst (big, juce::Image::BitmapData::writeOnly);
+            for (int y = 0; y < bh; ++y)
+            {
+                const int sy = y * frame.getHeight() / bh;
+                for (int x = 0; x < bw; ++x)
+                    dst.setPixelColour (x, y, src.getPixelColour (x * frame.getWidth() / bw, sy));
+            }
+        }
         hand.submit (big);
         const juce::SpinLock::ScopedLockType sl (previewLock);
         preview = img;
