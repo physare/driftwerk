@@ -5,6 +5,9 @@
 #  3. Installs the current build right away.
 # Needs the GitHub CLI signed in (run "gh auth login" once if it isn't).
 $ErrorActionPreference = 'Stop'
+$isAdmin = ([Security.Principal.WindowsPrincipal] [Security.Principal.WindowsIdentity]::GetCurrent()).IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+if (-not $isAdmin) { Write-Host 'Please run this from a PowerShell window opened with "Run as administrator".' -ForegroundColor Yellow; exit 1 }
+if (Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue) { Write-Host 'Please close Ableton first (it locks the plugin), then run this again.' -ForegroundColor Yellow; exit 1 }
 $user      = [Environment]::UserName
 $localApp  = [Environment]::GetFolderPath('LocalApplicationData')
 $home_     = Join-Path $localApp 'Driftwerk'
