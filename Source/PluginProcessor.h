@@ -12,6 +12,8 @@
 #include "Weird.h"
 #include "Waves.h"
 #include "Dream.h"
+#include "Breaks.h"
+#include "Bass.h"
 #include "Words.h"
 #include "Organism.h"
 
@@ -99,6 +101,30 @@ public:
     const dw::SampleData* getSampleForDisplay() const { return currentSample.load(); }
     juce::String getSampleName() const;
     bool hasUserSample() const { return userSample != nullptr; }
+
+    // PULSE: your own one-shot for any drum (message thread). nullptr / empty = the kit's drum.
+    bool loadPulseSample (int lane, const juce::File& f);
+    void clearPulseSample (int lane);
+    bool pulseLaneHasSample (int lane) const { return lane >= 0 && lane < 5 && pulseSampleNow[(size_t) lane].load() != nullptr; }
+    juce::String pulseSamplePath[5];
+    // BREAK: a drum loop sliced into sixteenths (SYNTH BREAK until you load one).
+    bool loadBreak (const juce::File& f, bool select = true);   // select: switch SOURCE to MY BREAK
+    void syncBreak();                          // re-slices after BARS or SOURCE change
+    const dw::BreakLoop* breakForDisplay() const { return breakNow.load(); }
+    bool hasMyBreak() const { return myBreakAudio != nullptr; }
+    juce::String breakPath;
+    std::atomic<int> breakSliceNow { -1 }, breakHits { 0 };
+    // BASS: the last notes it played, for the editor (MIDI note, -1 a rest; +256 accent, +512 slide)
+    static constexpr int bassHistSize = 32;
+    std::array<std::atomic<int>, bassHistSize> bassHist {};
+    std::atomic<int> bassHistHead { 0 }, bassNotes { 0 }, bassNewReq { 0 };   // bassNewReq: NEW (a new ACID line, the walk starts again)
+
+    // LAYERS: every sound's level and mute in one place, with a meter for each.
+    struct LayerDef { const char* name; const char* level; const char* mute; };
+    static constexpr int numLayers = 14;
+    static const LayerDef layerDefs[numLayers];
+    std::array<std::atomic<float>, numLayers> layerMeter {};   // peak of each layer over the last block
+    std::atomic<float> breakPosNow { 0.0f };
 
     // DREAM's MY SOUND: a file the loops play, pitched to the chord (message thread).
     static constexpr int dreamMySound = dw::DreamBank::MySound;
@@ -237,8 +263,11 @@ public:
     std::atomic<int> scopeWrite { 0 };
 
 private:
-    void parameterChanged (const juce::String& id, float) override { if (id == "grain.src") triggerAsyncUpdate(); }
-    void handleAsyncUpdate() override { syncGrainSource(); }
+    void parameterChanged (const juce::String& id, float) override
+    {
+        if (id == "grain.src" || id == "brk.src" || id == "brk.bars") triggerAsyncUpdate();
+    }
+    void handleAsyncUpdate() override { syncGrainSource(); syncBreak(); }
     std::unique_ptr<dw::SampleData> builtIns[dw::numBuiltInSounds];
     dw::SampleData* userSample = nullptr;
 
@@ -271,6 +300,16 @@ private:
     void playSlime (const Organism::Event& e);
     void slimeDrum (const Organism::Event& e);
     long long pulseLastK = -1;
+    // PULSE samples and BREAK: audio is never freed while the plugin lives (a hit may still be playing it).
+    std::array<std::atomic<const dw::SampleData*>, 5> pulseSampleNow {};
+    std::vector<std::unique_ptr<dw::SampleData>> pulseSampleStore, breakAudioStore;
+    std::unique_ptr<dw::SampleData> synthBreakAudio;
+    const dw::SampleData* myBreakAudio = nullptr;
+    std::vector<std::unique_ptr<dw::BreakLoop>> breakLoopStore;
+    std::atomic<const dw::BreakLoop*> breakNow { nullptr };
+    dw::BreakPlayer breakPlayer;
+    long long breakLastK = -1;
+    static std::unique_ptr<dw::SampleData> readSound (const juce::File& f, double maxSeconds, bool trimStart);
     bool pulseFlip[dw::Pulse::Lanes * dw::Pulse::Steps] {};
     void pulseStep (long long k, double stepSamples);
     int chopChunk = -1;
@@ -357,6 +396,19 @@ private:
     } arp;
     dw::Random arpRng { 0x5EED1234u };
     void arpClock();
+    // BASS: decides a note on the arp's clock (arpPlays / arpSemis: what the arp did on this step)
+    void bassClock (bool arpPlays, int arpSemis);
+    dw::BassVoice bassVoice;
+    dw::Random bassRng { 0xBA55u };
+    int bassTick = 0, bassLastChord = -999, bassWalk = 0;
+    struct AcidStep { bool on = false; int rel = 0; bool slide = false; float acc = 0.0f; };
+    AcidStep bassAcid[16];
+    bool bassAcidMade = false;
+    int bassNewSeen = 0;
+    enum Layer { L_OUT1, L_OUT2, L_DRONE, L_DREAM, L_GRAIN, L_CHORDS, L_LOOPS, L_SLIME, L_PULSE, L_BREAK, L_BASS, L_TEXTURE, L_WORDS, L_MEMORY };
+    float layerGain[numLayers] {}, layerTarget[numLayers] {}, layerPeak[numLayers] {};   // mutes fade over a few ms
+    std::array<std::atomic<float>*, numLayers> layerMuteParams {};
+    float layerCoef = 0.002f;
     int scaleSemitone (int degree) const;
     int arpPitchSet (int* out) const;
 
@@ -436,12 +488,17 @@ private:
         bool loopOn = false; int loopNotes = 0, loopVoices = 5, loopOct = 0;
         float loopLevel = 0.5f, loopLength = 14.0f, loopColour = 0.3f, loopTone = 0.55f, loopSwell = 0.4f, loopDecay = 6.0f,
               loopDrift = 0.3f, loopWeird = 0.25f;
-        bool slimePlay = false; int slimeVoice = 3, slimeRange = 2, slimeOct = 1;
+        bool slimePlay = false; int slimeVoice = 3, slimeStyle = 0, slimeRange = 2, slimeOct = 1;
         float slimeLevel = 0.5f, slimeTone = 0.6f, slimeWeird = 0.3f;
         bool pulseOn = false; int pulseStyle = 0, pulseSpeed = 1;
         float pulseLevel = 0.5f, pulseDensity = 0.5f, pulseSwing = 0.2f, pulseHuman = 0.3f, pulseTone = 0.45f, pulseSpace = 0.55f,
               pulseVary = 0.2f, pulseWeird = 0.15f;
         int pulseKit = 0, pulseLength = 0;
+        bool brkOn = false, brkDrums = false, brkFit = true;
+        bool bassOn = false; int bassMode = 0, bassRate = 1, bassRange = 1, bassWave = 2, bassTable = 0;
+        float bassShape = 0.3f, bassSub = 0.4f, bassCutoff = 380.0f, bassReso = 0.3f, bassEnv = 0.45f, bassDecay = 0.3f,
+              bassDrive = 0.25f, bassGlide = 0.15f, bassDensity = 0.6f, bassLength = 0.6f, bassLevel = 0.6f;
+        float brkLevel = 0.7f, brkChop = 0.35f, brkStutter = 0.15f, brkReverse = 0.1f, brkPitch = 0.0f, brkDust = 0.2f;
         float pulsePunch = 0.35f, pulseFill = 0.2f, pulseStutter = 0.0f, pulseChop = 0.0f;
         bool texOn = false; int texA = 0, texB = 0;
         float texLevel = 0.4f, texBlend = 0.4f, texDensity = 0.5f, texTone = 0.5f, texMotion = 0.5f, texKey = 0.5f, texSpace = 0.4f;

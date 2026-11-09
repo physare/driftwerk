@@ -45,6 +45,21 @@ int main (int argc, char** argv)
                 rp->setValueNotifyingHost (rp->convertTo0to1 (item.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
         proc.syncGrainSource();   // no message loop runs here, so pick up grain.src directly
     }
+    if (auto* env = std::getenv ("DW_BREAK"))   // BREAK: load a drum loop
+    {
+        const bool ok = proc.loadBreak (juce::File (env));
+        std::printf ("break: %s\n", ok ? juce::File (env).getFileName().toRawUTF8() : "failed to load");
+    }
+    if (auto* env = std::getenv ("DW_PSAMP"))   // PULSE: lane=path;lane=path one-shots
+    {
+        juce::StringArray items; items.addTokens (env, ";", "");
+        for (auto& it : items)
+        {
+            const int lane = it.upToFirstOccurrenceOf ("=", false, false).getIntValue();
+            const bool ok = proc.loadPulseSample (lane, juce::File (it.fromFirstOccurrenceOf ("=", false, false)));
+            std::printf ("pulse sample %d: %s\n", lane, ok ? "loaded" : "failed");
+        }
+    }
     if (auto* env = std::getenv ("DW_DREAM"))   // DREAM: load a file for MY SOUND
     {
         const bool ok = proc.loadDreamSound (juce::File (env));
@@ -152,6 +167,23 @@ int main (int argc, char** argv)
     rms = std::sqrt (rms / (2.0 * all.getNumSamples()));
     std::printf ("program %d peak %.3f rms %.4f\n", program, peak, rms);
     std::printf ("words played %d\n", proc.wordsPlayed.load());
+    if (const auto* bl = proc.breakForDisplay())
+        std::printf ("break %s: %.1f BPM, %d bars, %d slices, %d hits\n", bl->name.c_str(), bl->bpm, bl->bars, bl->steps, proc.breakHits.load());
+    {
+        juce::String hist;
+        const int head = proc.bassHistHead.load();
+        for (int i = 0; i < DriftwerkProcessor::bassHistSize; ++i)
+        {
+            const int v = proc.bassHist[(size_t) ((head + i) % DriftwerkProcessor::bassHistSize)].load();
+            if (v < 0) hist << ". ";
+            else hist << harm::pcName ((v & 255) % 12, true) << ((v & 255) / 12 - 1) << ((v & 256) ? "!" : "") << ((v & 512) ? "~" : "") << " ";
+        }
+        std::printf ("bass notes %d: %s\n", proc.bassNotes.load(), hist.toRawUTF8());
+        juce::String lay;
+        for (int k = 0; k < DriftwerkProcessor::numLayers; ++k)
+            lay << DriftwerkProcessor::layerDefs[k].name << " " << juce::String (proc.layerMeter[(size_t) k].load(), 3) << "  ";
+        std::printf ("layers: %s\n", lay.toRawUTF8());
+    }
     std::printf ("slime notes %d (ear events %d)  pulse hits %d %d %d %d %d  texture events %d  memory %.1fs\n", proc.slimeNotes.load(),
                  proc.organism.totalHits.load(), proc.pulseLaneHits[0].load(), proc.pulseLaneHits[1].load(), proc.pulseLaneHits[2].load(),
                  proc.pulseLaneHits[3].load(), proc.pulseLaneHits[4].load(), proc.texEvents.load(), proc.memSeconds.load());
@@ -205,7 +237,10 @@ int main (int argc, char** argv)
                              (int) (win == de));
                 if (win != nullptr && win != de)
                 {
-                    win->setBounds (0, 0, 1920, 1080);
+                    const juce::String size (env);   // DW_FS=1920x1200 picks the screen size (default 1920 x 1080)
+                    const int sw = size.containsChar ('x') ? size.upToFirstOccurrenceOf ("x", false, false).getIntValue() : 1920;
+                    const int sh = size.containsChar ('x') ? size.fromFirstOccurrenceOf ("x", false, false).getIntValue() : 1080;
+                    win->setBounds (0, 0, sw, sh);
                     juce::PNGImageFormat pf;
                     juce::File f (outDir + "/fullscreen_" + juce::String (env) + ".png");
                     f.deleteFile();

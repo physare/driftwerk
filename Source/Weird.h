@@ -19,7 +19,7 @@ inline float uni (Random& r) { return std::min (0.9999f, r.next() * 0.5f + 0.5f)
 // BUBBLES rise and pop, CHIRPS are little birds, and GRAIN plays the GRAIN sound at the note.
 struct SlimeVoices
 {
-    static constexpr int V = 12, KS = 8192;
+    static constexpr int V = 16, KS = 8192;
     enum Type { Drop = 0, Breath, Tine, Glass, Pluck, Marimba, Vowel, Bowed, Bubble, Chirp, Grain, NumTypes };
     struct Voice
     {
@@ -69,7 +69,7 @@ struct SlimeVoices
         for (int i = 0; i < V; ++i)
         {
             if (! v[i].on) { best = i; quiet = -1.0f; break; }
-            const float lvl = v[i].env * v[i].vel;
+            const float lvl = v[i].delay > 0.0f ? v[i].vel : v[i].env * v[i].vel;   // a note still waiting to start is kept
             if (lvl < quiet) { quiet = lvl; best = i; }
         }
         auto& vo = v[best];
@@ -388,7 +388,9 @@ struct Pulse
         return names[clampKit (kit)][lane < 0 ? 0 : (lane >= Lanes ? Lanes - 1 : lane)];
     }
 
-    struct Hit { int lane = 0; float vel = 0.0f, freq = 100.0f, pan = 0.0f; int wait = 0, variant = 0; };
+    // rate: a pitch change on top of the drum's own (a roll sliding, a fill climbing), used by
+    // your own samples, which ignore the key.
+    struct Hit { int lane = 0; float vel = 0.0f, freq = 100.0f, pan = 0.0f; int wait = 0, variant = 0; float rate = 1.0f; };
     struct Drum
     {
         bool on = false;
@@ -396,6 +398,9 @@ struct Pulse
         float t = 0.0f, vel = 0.0f, f = 100.0f, pan = 0.0f, tauMul = 1.0f, noiseMul = 1.0f, life = 1.0f;
         double ph = 0.0, ph2 = 0.0, ph3 = 0.0, mph = 0.0;
         Svf bp;
+        const SampleData* sd = nullptr;     // your own sound for this drum (kept alive by the processor)
+        double spos = 0.0, sinc = 1.0;
+        float sTau = 0.0f;                  // its decay (0 = the whole sound)
     };
     static constexpr int QN = 160;
     Hit queue[QN];
@@ -411,15 +416,22 @@ struct Pulse
     int kit = 0;
     float punch = 0.3f;
     float laneLevel[Lanes] { 1, 1, 1, 1, 1 }, lanePitch[Lanes] {}, laneDecay[Lanes] { 1, 1, 1, 1, 1 };
+    const SampleData* laneSample[Lanes] {};   // your own one-shots, nullptr = the kit's drum
     float crushL = 0.0f, crushR = 0.0f, crushPh = 0.0f;
 
     void prepare (float sampleRate) { sr = sampleRate; qn = 0; for (auto& x : d) x.on = false; }
+    static float kitGainOf (int k)
+    {
+        static const float kitGain[NumKits] { 1.0f, 1.25f, 1.4f, 0.55f, 1.15f, 1.9f, 1.5f };
+        return kitGain[clampKit (k)];
+    }
+    static constexpr float sampleGain = 0.75f;   // your own one-shots (normalised to a 0.9 peak) next to the kit
     bool busy() const { if (qn > 0) return true; for (auto& x : d) if (x.on) return true; return false; }
 
-    void schedule (int lane, float vel, float freq, float pan, int waitSamples, int variant)
+    void schedule (int lane, float vel, float freq, float pan, int waitSamples, int variant, float rate = 1.0f)
     {
         if (qn >= QN) return;
-        queue[qn++] = { lane, vel, freq, pan, std::max (0, waitSamples), variant };
+        queue[qn++] = { lane, vel, freq, pan, std::max (0, waitSamples), variant, rate };
     }
 
     void start (const Hit& h)
@@ -428,6 +440,21 @@ struct Pulse
         const auto& v = def (kit, h.lane);
         x.on = true; x.t = 0.0f; x.vel = h.vel * laneLevel[h.lane]; x.pan = h.pan; x.variant = h.variant; x.kit = kit;
         const float pitch = std::exp2 (lanePitch[h.lane] / 12.0f);
+        x.sd = laneSample[h.lane];
+        if (x.sd != nullptr && x.sd->length() > 16)
+        {   // Your own sound: PITCH and the hit's slide change its speed, DECAY shortens it, variant 2 plays it backwards.
+            const double rate = clampf (h.rate * pitch, 0.25f, 4.0f);
+            x.sinc = x.sd->sampleRate / (double) sr * rate;
+            x.spos = h.variant == 2 ? (double) (x.sd->length() - 2) : 0.0;
+            if (h.variant == 2) x.sinc = -x.sinc;
+            const float dec = laneDecay[h.lane];
+            x.sTau = dec >= 0.99f ? 0.0f : 0.4f * dec * dec;
+            x.life = (float) ((double) x.sd->length() / std::abs (x.sinc) / (double) sr) + 0.01f;
+            if (x.sTau > 0.0f) x.life = std::min (x.life, x.sTau * 9.0f + 0.01f);
+            ++hits; ++laneHits[h.lane];
+            return;
+        }
+        x.sd = nullptr;
         x.f = h.freq * pitch * (h.variant == 1 ? v.altPitch : 1.0f);
         x.tauMul = laneDecay[h.lane] * (h.variant == 1 ? v.altTau : 1.0f);
         x.noiseMul = 1.0f;
@@ -458,10 +485,33 @@ struct Pulse
         {
             auto& x = d[lane];
             if (! x.on) continue;
-            const auto& v = def (x.kit, lane);
             x.t += dt;
             const float t = x.t;
             if (t > x.life) { x.on = false; continue; }
+            if (x.sd != nullptr)
+            {
+                const auto& sd = *x.sd;
+                const int i0 = (int) x.spos;
+                if (i0 < 0 || i0 >= sd.length() - 1) { x.on = false; continue; }
+                const float fr = (float) (x.spos - (double) i0);
+                float yl = sd.left[(size_t) i0] + (sd.left[(size_t) i0 + 1] - sd.left[(size_t) i0]) * fr;
+                float yr = sd.right[(size_t) i0] + (sd.right[(size_t) i0 + 1] - sd.right[(size_t) i0]) * fr;
+                x.spos += x.sinc;
+                float env = x.sTau > 0.0f ? std::exp (-t / x.sTau) : 1.0f;
+                if (x.sinc < 0.0 && t < 0.004f) env *= t / 0.004f;          // backwards: no click where it starts
+                const float drive = punch * 0.8f;
+                if (drive > 0.0f)
+                {
+                    yl = softClip (yl * (1.0f + 3.0f * drive)) / (1.0f + 1.4f * drive);
+                    yr = softClip (yr * (1.0f + 3.0f * drive)) / (1.0f + 1.4f * drive);
+                }
+                // The same loudness whatever the kit (the kit gain below is undone).
+                const float g = x.vel * env * sampleGain / kitGainOf (kit);
+                ol += yl * g * std::min (1.0f, 1.0f - x.pan);
+                orr += yr * g * std::min (1.0f, 1.0f + x.pan);
+                continue;
+            }
+            const auto& v = def (x.kit, lane);
             const float tau = v.tau * x.tauMul;
             float y = 0.0f;
             if (v.tone > 0.0f)
@@ -518,8 +568,7 @@ struct Pulse
             ol = ol * 0.35f + crushL * 0.65f; orr = orr * 0.35f + crushR * 0.65f;
         }
         // The kits are balanced so that switching kit keeps the level about the same.
-        static const float kitGain[NumKits] { 1.0f, 1.25f, 1.4f, 0.55f, 1.15f, 1.9f, 1.5f };
-        ol *= kitGain[clampKit (kit)]; orr *= kitGain[clampKit (kit)];
+        ol *= kitGainOf (kit); orr *= kitGainOf (kit);
         // PUNCH: the whole kit pushed into a soft clipper, so it comes forward without spiking
         const float pg = 1.0f + 2.5f * punch;
         l += softClip (toneL.lowpass (ol) * pg) * (1.0f + 0.5f * punch) / pg;

@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Timewind VERSION 0.6.1)
+project(Timewind VERSION 0.7.0)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)

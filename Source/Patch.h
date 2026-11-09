@@ -6,7 +6,7 @@ namespace dw
 enum Module
 {
     M_CLOCK, M_ARP, M_VCO1, M_VCO2, M_DRONE, M_NOISE, M_LFO1, M_LFO2,
-    M_ENV1, M_ENV2, M_MIX, M_VCF1, M_VCF2, M_VCA1, M_VCA2, M_MASTER, M_CAMERA, M_DREAM, M_GRAIN,
+    M_ENV1, M_ENV2, M_MIX, M_VCF1, M_VCF2, M_VCA1, M_VCA2, M_MASTER, M_CAMERA, M_DREAM, M_GRAIN, M_BASS,
     NumModules
 };
 
@@ -26,6 +26,7 @@ enum Out
     O_CAM_X, O_CAM_Y, O_CAM_MOTION, O_CAM_TRIG,
     O_DREAM, O_GRAIN,
     O_CAM_PINCH, O_CAM_SPREAD, O_CAM_FIST, O_CAM_TILT,
+    O_BASS_PITCH, O_BASS_GATE,
     NumOuts
 };
 
@@ -67,6 +68,7 @@ inline const JackDef outDefs[NumOuts] = {
     { "dream.out", "OUT",   M_DREAM },  { "grain.out", "OUT",  M_GRAIN },
     { "cam.pinch", "PINCH", M_CAMERA }, { "cam.spread", "SPREAD", M_CAMERA },
     { "cam.fist",  "FIST",  M_CAMERA }, { "cam.tilt",   "TILT",   M_CAMERA },
+    { "bass.pitch", "PITCH", M_BASS },  { "bass.gate",  "GATE",   M_BASS },
 };
 
 inline const JackDef inDefs[NumIns] = {
