@@ -1474,6 +1474,8 @@ void DriftwerkProcessor::prepareToPlay (double sampleRate, int)
 {
     sr = sampleRate;
     vcf1.sampleRate = vcf2.sampleRate = (float) sr;
+    limiter.prepare ((float) sr);
+    setLatencySamples (limiter.look);
     vcf1.reset(); vcf2.reset();
     ensemble.prepare ((float) sr);
     echo.prepare ((float) sr);
@@ -3048,8 +3050,8 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     // DC blocker
     dcL = l - dcInL + 0.9995f * dcL; dcInL = l;
     dcR = r - dcInR + 0.9995f * dcR; dcInR = r;
-    outL = softClip (dcL);
-    outR = softClip (dcR);
+    outL = dcL; outR = dcR;
+    limiter.process (outL, outR);
 }
 
 void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::MidiBuffer& midi)

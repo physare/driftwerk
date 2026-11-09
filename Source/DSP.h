@@ -100,10 +100,21 @@ struct Ladder
 
     void reset() { std::fill (std::begin (s), std::end (s), 0.0f); }
 
+    // Runs twice per sample (the input is interpolated), so the drive aliases far less and the
+    // cutoff stays in tune right to the top.
+    float lastIn = 0.0f;
     float process (float x, float cutoff, float resonance, float drive)
     {
-        cutoff = clampf (cutoff, 15.0f, sampleRate * 0.45f);
-        const float g = std::tan (kPi * cutoff / sampleRate);
+        const float mid = 0.5f * (lastIn + x);
+        lastIn = x;
+        const float a = step (mid, cutoff, resonance, drive);
+        return 0.5f * (a + step (x, cutoff, resonance, drive));
+    }
+
+    float step (float x, float cutoff, float resonance, float drive)
+    {
+        cutoff = clampf (cutoff, 15.0f, sampleRate * 0.9f);
+        const float g = std::tan (kPi * cutoff / (sampleRate * 2.0f));
         const float G = g / (1.0f + g);
         const float k = resonance * 3.9f;
 
@@ -125,6 +136,42 @@ struct Ladder
             y = out;
         }
         return y;
+    }
+};
+
+//==============================================================================
+// Master limiter: looks 2 ms ahead and turns the level down before a peak arrives, so loud
+// moments stay clean instead of being squashed by a clipper. Both channels move together.
+struct Limiter
+{
+    static constexpr int maxLook = 256;
+    float bl[maxLook] {}, br[maxLook] {}, need[maxLook] {};
+    int look = 96, pos = 0;
+    float gain = 1.0f, atk = 0.1f, rel = 0.0002f, ceiling = 0.89f;
+
+    void prepare (float sampleRate)
+    {
+        look = std::max (16, std::min (maxLook, (int) (sampleRate * 0.002f)));
+        atk = 1.0f - std::exp (-1.0f / ((float) look * 0.25f));
+        rel = 1.0f - std::exp (-1.0f / (sampleRate * 0.15f));
+        std::fill (std::begin (bl), std::end (bl), 0.0f);
+        std::fill (std::begin (br), std::end (br), 0.0f);
+        std::fill (std::begin (need), std::end (need), 1.0f);
+        pos = 0; gain = 1.0f;
+    }
+
+    void process (float& l, float& r)
+    {
+        const float peak = std::max (std::abs (l), std::abs (r));
+        const float outL = bl[pos], outR = br[pos];
+        bl[pos] = l; br[pos] = r;
+        need[pos] = peak > ceiling ? ceiling / peak : 1.0f;
+        pos = (pos + 1) % look;
+        float lowest = 1.0f;                       // the most any sample still on its way needs
+        for (int i = 0; i < look; ++i) lowest = std::min (lowest, need[i]);
+        gain += (lowest - gain) * (lowest < gain ? atk : rel);
+        l = clampf (outL * gain, -1.0f, 1.0f);
+        r = clampf (outR * gain, -1.0f, 1.0f);
     }
 };
 

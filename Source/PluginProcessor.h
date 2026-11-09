@@ -458,6 +458,7 @@ private:
     bool env1LastGate = false, env2LastGate = false;
     // Filters
     dw::Ladder vcf1, vcf2;
+    dw::Limiter limiter;
     // Camera
     float camX = 0, camY = 0, camMot = 0;
     float camPinch = 0, camSpread = 0, camFist = 0, camTilt = 0;
