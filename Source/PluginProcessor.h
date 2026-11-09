@@ -8,6 +8,7 @@
 #include "Patch.h"
 #include "CameraTracker.h"
 #include "Sounds.h"
+#include "Harmony.h"
 
 class DriftwerkProcessor : public juce::AudioProcessor,
                            private juce::AudioProcessorValueTreeState::Listener,
@@ -113,14 +114,47 @@ public:
     // Play notes on a MIDI keyboard into the running sequence.
     std::atomic<bool> recordNotes { false };
 
-    // Chord progression state for the editor: current chord (0..3, -1 off), its pad chord and root offset.
-    std::atomic<int> progIndex { -1 }, progChord { 1 }, progOffset { 0 };
-    juce::String progressionChordName (int k) const;
+    // Chord progression state for the editor (written by the audio thread).
+    std::atomic<int> progIndex { -1 }, progOffset { 0 }, chordIvMask { 0 }, keyPcNow { 0 };
+    std::atomic<float> progPhase { 0.0f };                  // 0..1 through the chord playing now
+    std::atomic<int> arpNotePc { 0 }, arpNoteCount { 0 };   // the arp's last note, for the chord wheel
+    std::array<std::atomic<int>, harm::maxSlots> wanderHist;  // WANDER: the chords so far (degree * 16 + type), oldest first
+    std::atomic<int> wanderCount { 0 }, wanderNextCode { 0 };
     void setRecordNotes (bool on);
+
+    // Everything the Harmony tab shows about the progression.
+    struct ProgView
+    {
+        int mode = 0, scale = 0, keyPc = 0, count = 0, current = -1;
+        harm::Spelling spell;
+        juce::String keyName;
+        harm::Harm chords[harm::maxSlots], cur, next;
+        juce::String names[harm::maxSlots], numerals[harm::maxSlots], curName, curNumeral, nextName, nextNumeral;
+        double beats[harm::maxSlots] {};
+        float phase = 0.0f;
+    };
+    ProgView getProgressionView() const;
+    void copyProgressionToMine();                         // EDIT THESE: the progression becomes MY CHORDS
+    void randomiseMyChords();                             // NEW CHORDS: a fresh MY CHORDS progression
+    void setMyChord (int slot, int degree, int type, int length);   // -1 leaves that part alone
+    void setParam (const juce::String& id, float realValue);
 
     // CHORDS layer: the notes it is playing now (for the editor).
     std::array<std::atomic<int>, dw::ChordLayer::V> chordNotes;
     std::atomic<int> chordNoteCount { 0 };
+
+    // CHORDS layer HITS pattern (style STEPS). Each step has a weight; DENSITY lights the steps
+    // whose weight is below it. A click forces a step on (1) or off (-1); NEW reshuffles.
+    static constexpr int numHitSteps = 16;
+    std::array<std::atomic<float>, numHitSteps> hitWeight;
+    std::array<std::atomic<int>, numHitSteps> hitForce;
+    std::atomic<int> hitStepNow { -1 };
+    bool hitOn (int i, float density) const;
+    bool hitOnNow (int i) const;                           // from the DENSITY knob (editor)
+    void setHit (int i, bool on);
+    void newHits();
+    juce::String getHitString() const;
+    void setHitString (const juce::String&);
 
     //==========================================================================
     // Record everything Timewind plays to a WAV file (Music/Timewind).
@@ -142,12 +176,27 @@ private:
 
     // CHORDS layer state
     dw::ChordLayer chordLayer;
-    int chdLastKey = -1, chdLastMode = -1;
+    long long chdLastKey = -1;
+    int chdLastMode = -1;
     long long chdLastBeat = -1;
     bool chdLastArpGate = false, chdWasOn = false;
     double curBeat = 0.0;
+    dw::Random hitRng { 0x417517u };
     void updateChordLayer();
+
+    // Harmony: the chord playing now, rebuilt only when it changes.
+    harm::Harm curHarm;
+    long long harmKey = -1;
+    float progPhaseNow = 0.0f;
     void applyProgression (double beat);
+    // WANDER: a progression that never repeats.
+    dw::Random wanderRng { (uint32_t) juce::Random::getSystemRandom().nextInt() | 1u };
+    bool wanderOn = false;
+    double wanderStart = 0.0, wanderLen = 16.0;
+    int wanderCur = 0 * 16 + harm::TNinth, wanderNext = 0;
+    void advanceWander (double beat, double evenBeats);
+    double wanderDuration (double evenBeats);
+    void pushWander (int code);
 
     juce::StringArray slots;
     juce::File slotsFile() const;
@@ -272,6 +321,9 @@ private:
         bool chdOn = false; int chdMode = 0, chdVoices = 4, chdOct = 0;
         float chdLevel = 0.45f, chdWave = 0.3f, chdTone = 0.55f, chdAttack = 0.9f, chdRelease = 2.5f, chdWidth = 0.6f;
         int progMode = 0, progBars = 8; float progGlide = 0.2f;
+        int progColour = 0, progLen = 4, progRhythm = 0, droneChordUser = 1, dreamChordUser = 1;
+        int slotDeg[harm::maxSlots] {}, slotType[harm::maxSlots] {}, slotLen[harm::maxSlots] {};
+        int chdSteps = 8, chdRate = 1; float chdDensity = 0.5f, chdGate = 0.7f, chdVary = 0.0f;
         int vco1Oct = 0, vco2Oct = 0; float vco1Fine = 0, vco2Fine = 0, vco1Pw = 0.5f, vco2Pw = 0.5f;
         float vco1Pwm = 0.5f, vco2Pwm = 0.5f, vco1Fm = 0.0f, vco2Fm = 0.0f;
         int droneChord = 1, droneOct = 0; float droneDetune = 0.4f, droneDriftAmt = 0.4f, droneLevel = 0.6f;

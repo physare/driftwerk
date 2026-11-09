@@ -786,6 +786,13 @@ struct ChordLayer
         }
     }
 
+    // The chord changed while struck voices still ring: they glide to the new notes.
+    void retarget()
+    {
+        for (int i = 0; i < V; ++i)
+            if (v[i].active && ! v[i].held && numTargets > 0) v[i].target = targets[std::min (i, numTargets - 1)];
+    }
+
     float process (float glideCoef, float wave, float tone, float attack, float release, float width, float& l, float& r)
     {
         if (coefCounter-- <= 0)

@@ -45,6 +45,15 @@ int main (int argc, char** argv)
                 rp->setValueNotifyingHost (rp->convertTo0to1 (item.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
         proc.syncGrainSource();   // no message loop runs here, so pick up grain.src directly
     }
+    if (auto* env = std::getenv ("DW_ACT"))   // press buttons: copy (EDIT THESE), new (NEW CHORDS), hits (NEW)
+    {
+        const juce::String a (env);
+        if (a.contains ("copy")) proc.copyProgressionToMine();
+        if (a.contains ("new")) proc.randomiseMyChords();
+        if (a.contains ("hits")) proc.newHits();
+        std::printf ("after %s: mode %d, %d chords\n", env, (int) proc.apvts.getRawParameterValue ("prog.mode")->load(),
+                     (int) proc.apvts.getRawParameterValue ("prog.len")->load() + 2);
+    }
     if (auto* env = std::getenv ("DW_HAND"))
     {
         juce::StringArray v; v.addTokens (env, ",", "");
@@ -59,10 +68,25 @@ int main (int argc, char** argv)
     juce::AudioBuffer<float> buf (2, block);
     juce::MidiBuffer midi;
     float peak = 0; double rms = 0;
+    const bool trace = std::getenv ("DW_TRACE") != nullptr;   // print each chord change
+    int lastSig = -1;
     for (int pos = 0; pos + block <= all.getNumSamples(); pos += block)
     {
         buf.clear();
         proc.processBlock (buf, midi);
+        if (trace)
+        {
+            const int sig = proc.progIndex.load() * 100000 + proc.progOffset.load() * 5000 + proc.chordIvMask.load();
+            if (sig != lastSig)
+            {
+                lastSig = sig;
+                const auto v = proc.getProgressionView();
+                juce::String notes;
+                for (int i = 0; i < proc.chordNoteCount.load(); ++i) notes << harm::noteName (proc.chordNotes[(size_t) i].load(), v.spell) << " ";
+                std::printf ("  %6.2fs  #%d  %-10s %-5s  next %-10s  [%s]  %s\n", pos / sr, v.current, v.curName.toRawUTF8(), v.curNumeral.toRawUTF8(),
+                             v.nextName.toRawUTF8(), v.keyName.toRawUTF8(), notes.toRawUTF8());
+            }
+        }
         for (int c = 0; c < 2; ++c)
         {
             all.copyFrom (c, pos, buf, c, 0, block);
@@ -112,6 +136,33 @@ int main (int argc, char** argv)
             de->refreshNow();
         }
         ed->setSize (MainView::designW, MainView::designH);
+        if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get()))
+            for (int k = 0; k < 20; ++k) de->refreshNow();          // let the animations settle
+        if (auto* env = std::getenv ("DW_FS"))
+            if (auto* de = dynamic_cast<DriftwerkEditor*> (ed.get()))
+            {
+                // FULL SCREEN in a host: the rack moves to its own window and back again.
+                DriftwerkEditor::fullScreenOnDesktop = false;
+                de->setFull (true);
+                auto* win = de->view.getParentComponent();
+                std::printf ("full screen: window %s, %d x %d, on desktop %d, editor holds view %d\n", win != nullptr ? win->getName().toRawUTF8() : "none",
+                             win != nullptr ? win->getWidth() : 0, win != nullptr ? win->getHeight() : 0, win != nullptr && win->isOnDesktop(),
+                             (int) (win == de));
+                if (win != nullptr && win != de)
+                {
+                    win->setBounds (0, 0, 1920, 1080);
+                    juce::PNGImageFormat pf;
+                    juce::File f (outDir + "/fullscreen_" + juce::String (env) + ".png");
+                    f.deleteFile();
+                    if (auto os = f.createOutputStream()) pf.writeImageToStream (win->createComponentSnapshot (win->getLocalBounds(), true, 1.0f), *os);
+                    auto edImg = ed->createComponentSnapshot (ed->getLocalBounds(), true, 0.5f);
+                    juce::File f2 (outDir + "/fullscreen_editor.png");
+                    f2.deleteFile();
+                    if (auto os = f2.createOutputStream()) pf.writeImageToStream (edImg, *os);
+                }
+                de->setFull (false);
+                std::printf ("back: editor holds view %d, full %d\n", (int) (de->view.getParentComponent() == de), (int) de->isFull());
+            }
         auto img = ed->createComponentSnapshot (ed->getLocalBounds(), true, 1.0f);
         juce::File png (outDir + "/editor_" + tag + ".png");
         png.deleteFile();

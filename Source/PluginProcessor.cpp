@@ -13,42 +13,10 @@ const double clockDivBeats[] { 1.0, 0.5, 1.0 / 3.0, 0.25, 1.0 / 6.0, 0.125 };
 const juce::StringArray echoDivNames { "1/16", "1/8", "1/8D", "1/4", "1/4D", "1/2", "FREE" };
 const double echoDivBeats[] { 0.25, 0.5, 0.75, 1.0, 1.5, 2.0, 0.0 };
 
-const juce::StringArray scaleNames { "MINOR", "DORIAN", "PHRYG", "PENTA", "HARM", "WHOLE", "MAJOR", "LYDIAN" };
-const std::vector<std::vector<int>> scales {
-    { 0, 2, 3, 5, 7, 8, 10 },
-    { 0, 2, 3, 5, 7, 9, 10 },
-    { 0, 1, 3, 5, 7, 8, 10 },
-    { 0, 3, 5, 7, 10 },
-    { 0, 2, 3, 5, 7, 8, 11 },
-    { 0, 2, 4, 6, 8, 10 },
-    { 0, 2, 4, 5, 7, 9, 11 },
-    { 0, 2, 4, 6, 7, 9, 11 },
-};
-
-// Dream pad voicings (semitones above the shared root). The arp's PADS mode plays only these notes.
-const int dreamChords[6][6] {
-    { 0, 4, 7, 11, 14, 19 }, { 0, 3, 7, 10, 14, 17 }, { 0, 2, 7, 12, 14, 19 },
-    { 0, 4, 6, 11, 14, 18 }, { 0, 4, 7, 14, 16, 19 }, { 0, 5, 10, 15, 19, 22 } };
+// Scales, chord voicings and progressions live in Harmony.h (shared with the editor).
+using harm::scaleNames; using harm::scales; using harm::dreamChords; using harm::dreamChordNames;
+using harm::progNames; using harm::progBarNames; using harm::progBars;
 const juce::StringArray arpFollowNames { "SCALE", "PADS", "ROOTS" };
-const juce::StringArray dreamChordNames { "MAJ 7", "MIN 9", "SUS 2", "LYDIAN", "ADD 9", "QUARTAL" };
-
-// Chord progressions: four chords each, as { root offset in semitones, pad chord, drone chord }.
-// Every chord stays inside the key (except CREEPY, which leaves it on purpose).
-const juce::StringArray progNames { "OFF", "PEACEFUL", "DREAMY", "DRIFTING", "CREEPY" };
-const juce::StringArray progBarNames { "1 BAR", "2 BARS", "4 BARS", "8 BARS", "16 BARS" };
-const int progBars[] { 1, 2, 4, 8, 16 };
-struct ProgChord { int offset, dream, drone; };
-const ProgChord progTable[5][2][4] {
-    { { { 0, 1, 1 }, { 0, 1, 1 }, { 0, 1, 1 }, { 0, 1, 1 } }, { { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 }, { 0, 0, 1 } } },
-    // PEACEFUL   minor: i  VI  III  VII              major: I  vi  IV  V
-    { { { 0, 1, 1 }, { 8, 0, 1 }, { 3, 4, 1 }, { 10, 2, 1 } }, { { 0, 0, 1 }, { 9, 1, 1 }, { 5, 0, 1 }, { 7, 2, 1 } } },
-    // DREAMY     minor: i  iv  i  VI                 major: I  IV(lyd)  I  vi
-    { { { 0, 1, 2 }, { 5, 1, 2 }, { 0, 1, 2 }, { 8, 0, 2 } }, { { 0, 0, 2 }, { 5, 3, 2 }, { 0, 0, 2 }, { 9, 1, 2 } } },
-    // DRIFTING   minor: i(quartal) VII(sus) VI(add9) iv    major: I(add9) V(sus) vi IV(lyd)
-    { { { 0, 5, 4 }, { 10, 2, 4 }, { 8, 4, 1 }, { 5, 1, 4 } }, { { 0, 4, 4 }, { 7, 2, 4 }, { 9, 1, 1 }, { 5, 3, 4 } } },
-    // CREEPY     i  bII  bVI  tritone, slow glides
-    { { { 0, 5, 3 }, { 1, 2, 5 }, { 8, 1, 3 }, { 6, 5, 5 } }, { { 0, 5, 3 }, { 1, 2, 5 }, { 8, 1, 3 }, { 6, 5, 5 } } },
-};
 
 const juce::StringArray chordNames { "UNISON", "FIFTH", "OCTAVE", "MINOR", "SUS", "CLUSTER" };
 const int chords[6][6] {
@@ -65,7 +33,16 @@ const juce::StringArray lfoShapeNames { "SINE", "TRI", "S&H", "DRIFT" };
 // Drone TYPE: what each of the six drone voices is made of. COLOUR (drn.wave) shapes each type.
 const juce::StringArray droneTypeNames { "SAWS", "ORGAN", "STRINGS", "GLASS", "CHOIR" };
 // CHORDS layer styles.
-const juce::StringArray chordStyleNames { "PAD", "SWELL", "PULSE", "ARP HITS", "STRUM" };
+const juce::StringArray chordStyleNames { "PAD", "SWELL", "PULSE", "ARP HITS", "STRUM", "STEPS" };
+constexpr int chordStepsStyle = 5;
+// HITS pattern: how long each step is.
+const juce::StringArray hitRateNames { "1/16", "1/8", "1/4", "1/2", "1 BAR" };
+const double hitRateBeats[] { 0.25, 0.5, 1.0, 2.0, 4.0 };
+// A gentle default pattern: at DENSITY 0.5 over 8 steps it plays 3 + 3 + 2.
+const float defaultHitWeights[16] { 0.0f, 0.9f, 0.7f, 0.15f, 0.55f, 0.85f, 0.3f, 0.95f, 0.4f, 0.8f, 0.65f, 0.2f, 0.6f, 0.9f, 0.35f, 0.75f };
+const char* const slotDegIds[] { "prog.d1", "prog.d2", "prog.d3", "prog.d4", "prog.d5", "prog.d6", "prog.d7", "prog.d8" };
+const char* const slotTypeIds[] { "prog.t1", "prog.t2", "prog.t3", "prog.t4", "prog.t5", "prog.t6", "prog.t7", "prog.t8" };
+const char* const slotLenIds[] { "prog.b1", "prog.b2", "prog.b3", "prog.b4", "prog.b5", "prog.b6", "prog.b7", "prog.b8" };
 
 using NRange = juce::NormalisableRange<float>;
 
@@ -284,6 +261,29 @@ const std::vector<Preset>& presets()
             { "grain.src", 1 }, { "grain.level", 0.45f }, { "grain.pitch", -12 }, { "grain.reverse", 0.7f }, { "grain.size", 1.0f },
             { "dream.level", 0.15f }, { "dream.warp", 0.8f }, { "hall.size", 0.98f }, { "hall.mix", 0.6f }, { "echo.div", 5 }, { "echo.fb", 0.7f } } },
 
+        { "Chords + textures", "Wandering Hymn",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;lfo2.out>vco1.pwm;" DRONE_OUT "lfo1.out>vcf2.cv1",
+          { { "prog.mode", 10 }, { "prog.rhythm", 1 }, { "prog.bars", 1 }, { "prog.glide", 0.45f }, { "arp.scale", 6 }, { "arp.root", 43 },
+            { "drn.type", 4 }, { "drn.wave", 0.4f }, { "drn.breath", 0.4f }, { "drn.oct", -1 }, { "drn.level", 0.45f }, { "vcf2.cut", 2600 }, { "vcf2.cv1", 0.2f },
+            { "chd.on", 1 }, { "chd.mode", 5 }, { "chd.steps", 8 }, { "chd.rate", 1 }, { "chd.density", 0.45f }, { "chd.gate", 0.9f }, { "chd.vary", 0.3f },
+            { "chd.level", 0.4f }, { "chd.voices", 4 }, { "chd.wave", 0.2f }, { "chd.tone", 0.5f }, { "chd.attack", 0.06f }, { "chd.release", 1.2f },
+            { "arp.follow", 1 }, { "arp.density", 0.5f }, { "arp.range", 3 }, { "arp.gate", 0.2f }, { "clk.div", 3 }, { "vco1.oct", 1 },
+            { "env1.d", 0.2f }, { "vcf1.cut", 1100 }, { "vcf1.cv2", 0.0f }, { "out.lvl1", 0.3f }, { "lfo1.rate", 0.02f },
+            { "dream.level", 0.25f }, { "grain.src", 3 }, { "grain.level", 0.25f }, { "grain.size", 0.8f }, { "grain.density", 4 },
+            { "echo.div", 2 }, { "echo.fb", 0.5f }, { "echo.mix", 0.3f }, { "hall.size", 0.9f }, { "hall.mix", 0.55f }, { "hall.shimmer", 0.35f } } },
+        { "Chords + textures", "Postcard Loop",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.pls>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
+          { { "prog.mode", 11 }, { "prog.len", 3 }, { "prog.bars", 1 }, { "prog.glide", 0.25f }, { "prog.colour", 3 }, { "arp.scale", 0 }, { "arp.root", 40 },
+            { "prog.d1", 0 }, { "prog.d2", 5 }, { "prog.d3", 6 }, { "prog.d4", 3 }, { "prog.d5", 4 },
+            { "prog.b1", 3 }, { "prog.b2", 2 }, { "prog.b3", 2 }, { "prog.b4", 1 }, { "prog.b5", 1 },
+            { "drn.type", 2 }, { "drn.wave", 0.6f }, { "drn.chord", 2 }, { "drn.oct", -2 }, { "drn.level", 0.4f }, { "vcf2.cut", 1800 },
+            { "chd.on", 1 }, { "chd.mode", 5 }, { "chd.steps", 16 }, { "chd.rate", 0 }, { "chd.density", 0.35f }, { "chd.gate", 0.5f }, { "chd.vary", 0.1f },
+            { "chd.level", 0.32f }, { "chd.voices", 5 }, { "chd.wave", 0.55f }, { "chd.tone", 0.45f }, { "chd.attack", 0.005f }, { "chd.release", 0.6f }, { "chd.oct", -1 },
+            { "arp.follow", 1 }, { "arp.density", 0.7f }, { "arp.mutate", 0.08f }, { "arp.gate", 0.3f }, { "clk.div", 3 },
+            { "vcf1.cut", 520 }, { "vcf1.res", 0.6f }, { "vcf1.cv2", 0.5f }, { "lfo1.rate", 0.03f }, { "out.lvl1", 0.45f },
+            { "tape.wow", 0.45f }, { "tape.age", 0.5f }, { "tape.hiss", 0.22f }, { "dream.level", 0.3f }, { "dream.warp", 0.6f },
+            { "grain.src", 6 }, { "grain.level", 0.25f }, { "echo.div", 2 }, { "echo.mix", 0.3f }, { "hall.mix", 0.45f } } },
+
         //======================================================================  HANDS: the camera plays it
         { "Hands (camera)", "Hand Garden", nullptr,
           { { "cam.on", 1 }, { "play.on", 1 }, { "play.depth", 0.85f }, { "dream.level", 0.7f }, { "grain.level", 0.5f },
@@ -480,6 +480,23 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("chd.attack", "Chords Attack", skewed (0.002f, 8.0f, 0.6f), 0.9f);
     fl ("chd.release", "Chords Release", skewed (0.02f, 12.0f, 1.5f), 2.5f);
     fl ("chd.width", "Chords Width", NRange (0.0f, 1.0f), 0.6f);
+    // Harmony: chord colour, MY CHORDS (up to 8 chords, each with its own length), WANDER rhythm
+    ch ("prog.colour", "Chord Colour", harm::colourNames, 0);
+    ch ("prog.len", "My Chords Length", harm::lengthNames, 2);
+    ch ("prog.rhythm", "Chord Rhythm", harm::rhythmNames, 0);
+    for (int k = 0; k < harm::maxSlots; ++k)
+    {
+        const juce::String n (k + 1);
+        ch (slotDegIds[k], ("My Chord " + n + " Degree").toRawUTF8(), harm::degreeNames, harm::defaultDegrees[k]);
+        ch (slotTypeIds[k], ("My Chord " + n + " Type").toRawUTF8(), harm::slotTypeNames, 0);
+        ch (slotLenIds[k], ("My Chord " + n + " Length").toRawUTF8(), harm::slotLenNames, 0);
+    }
+    // CHORDS layer HITS pattern
+    in ("chd.steps", "Chords Hit Steps", 2, 16, 8);
+    ch ("chd.rate", "Chords Hit Rate", hitRateNames, 1);
+    fl ("chd.density", "Chords Hit Density", NRange (0.0f, 1.0f), 0.5f);
+    fl ("chd.gate", "Chords Hit Gate", NRange (0.05f, 1.0f), 0.7f);
+    fl ("chd.vary", "Chords Hit Vary", NRange (0.0f, 1.0f), 0.0f);
 
     return { ps.begin(), ps.end() };
 }
@@ -515,6 +532,10 @@ DriftwerkProcessor::DriftwerkProcessor()
         }
     effective.resize (paramList.size(), 0.0f);
     for (auto& c : chordNotes) c.store (0);
+    for (auto& w : wanderHist) w.store (0);
+    for (int i = 0; i < numHitSteps; ++i) { hitWeight[(size_t) i].store (defaultHitWeights[i]); hitForce[(size_t) i].store (0); }
+    curHarm = harm::padChord (0, 1, 1, 0);
+    chordIvMask.store (curHarm.ivMask());
     syncGrainSource();
     apvts.addParameterListener ("grain.src", this);
 
@@ -801,10 +822,9 @@ int DriftwerkProcessor::arpPitchSet (int* out) const
 {
     if (p.arpFollow == 1)
     {
-        bool has[12] {};
-        for (int k = 0; k < 6; ++k) has[dreamChords[juce::jlimit (0, 5, p.dreamChord)][k] % 12] = true;
+        const int m = curHarm.ivMask();
         int n = 0;
-        for (int k = 0; k < 12; ++k) if (has[k]) out[n++] = k;
+        for (int k = 0; k < 12; ++k) if ((m >> k) & 1) out[n++] = k;
         return n;
     }
     if (p.arpFollow == 2) { out[0] = 0; out[1] = 7; return 2; }
@@ -862,9 +882,12 @@ void DriftwerkProcessor::arpClock()
 
     if (play)
     {
-        arp.pitchOut = (float) (scaleSemitone (deg) + (p.arpFollow != 0 ? chordOffsetTarget : 0)) / 12.0f;
+        const int semis = scaleSemitone (deg) + (p.arpFollow != 0 ? chordOffsetTarget : 0);
+        arp.pitchOut = (float) semis / 12.0f;
         arp.gateOut = true;
         arp.gateLeft = juce::jmax (8, (int) ((float) arp.clockPeriod * p.gateLen));
+        arpNotePc.store ((((p.root + midiTranspose + semis) % 12) + 12) % 12, std::memory_order_relaxed);
+        arpNoteCount.fetch_add (1, std::memory_order_relaxed);
     }
     arp.rndOut = arp.rnd[arp.step] * 2.0f - 1.0f;
 }
@@ -953,10 +976,21 @@ void DriftwerkProcessor::updateBlockParams()
     p.chdOn = f ("chd.on") > 0.5f; p.chdMode = i ("chd.mode"); p.chdVoices = i ("chd.voices"); p.chdOct = i ("chd.oct");
     p.chdLevel = f ("chd.level"); p.chdWave = f ("chd.wave"); p.chdTone = f ("chd.tone");
     p.chdAttack = f ("chd.attack"); p.chdRelease = f ("chd.release"); p.chdWidth = f ("chd.width");
-    p.progMode = i ("prog.mode"); p.progBars = progBars[juce::jlimit (0, 4, i ("prog.bars"))]; p.progGlide = f ("prog.glide");
+    p.progMode = juce::jlimit (0, harm::numProgModes - 1, i ("prog.mode"));
+    p.progBars = progBars[juce::jlimit (0, 4, i ("prog.bars"))]; p.progGlide = f ("prog.glide");
+    p.progColour = juce::jlimit (0, 6, i ("prog.colour")); p.progLen = juce::jlimit (2, harm::maxSlots, i ("prog.len") + 2);
+    p.progRhythm = juce::jlimit (0, 3, i ("prog.rhythm"));
+    for (int k = 0; k < harm::maxSlots; ++k)
+    {
+        p.slotDeg[k] = juce::jlimit (0, 6, i (slotDegIds[k]));
+        p.slotType[k] = juce::jlimit (0, harm::NumTypes - 1, i (slotTypeIds[k]));
+        p.slotLen[k] = juce::jlimit (0, 6, i (slotLenIds[k]));
+    }
+    p.chdSteps = juce::jlimit (2, numHitSteps, i ("chd.steps")); p.chdRate = juce::jlimit (0, 4, i ("chd.rate"));
+    p.chdDensity = f ("chd.density"); p.chdGate = f ("chd.gate"); p.chdVary = f ("chd.vary");
     p.vco1Oct = i ("vco1.oct"); p.vco1Fine = f ("vco1.fine"); p.vco1Pw = f ("vco1.pw"); p.vco1Pwm = f ("vco1.pwm"); p.vco1Fm = f ("vco1.fm");
     p.vco2Oct = i ("vco2.oct"); p.vco2Fine = f ("vco2.fine"); p.vco2Pw = f ("vco2.pw"); p.vco2Pwm = f ("vco2.pwm"); p.vco2Fm = f ("vco2.fm");
-    p.droneChord = i ("drn.chord"); p.droneOct = i ("drn.oct"); p.droneDetune = f ("drn.detune");
+    p.droneChord = p.droneChordUser = juce::jlimit (0, 5, i ("drn.chord")); p.droneOct = i ("drn.oct"); p.droneDetune = f ("drn.detune");
     p.droneDriftAmt = f ("drn.drift"); p.droneLevel = f ("drn.level");
     p.snhSlew = f ("nz.slew");
     p.lfo1Rate = f ("lfo1.rate"); p.lfo1Shape = i ("lfo1.shape"); p.lfo2Rate = f ("lfo2.rate"); p.lfo2Shape = i ("lfo2.shape");
@@ -974,7 +1008,7 @@ void DriftwerkProcessor::updateBlockParams()
     p.echoTime = juce::jlimit (0.02f, 2.4f, p.echoTime);
     p.camSlew = f ("cam.slew");
     p.tune = f ("out.tune");
-    p.dreamChord = i ("dream.chord"); p.dreamRate = f ("dream.rate"); p.dreamTone = f ("dream.tone");
+    p.dreamChord = p.dreamChordUser = juce::jlimit (0, 5, i ("dream.chord")); p.dreamRate = f ("dream.rate"); p.dreamTone = f ("dream.tone");
     p.dreamWarp = f ("dream.warp"); p.dreamLevel = f ("dream.level");
     p.gPos = f ("grain.pos"); p.gSpray = f ("grain.spray"); p.gSize = f ("grain.size"); p.gDensity = f ("grain.density");
     p.gPitch = f ("grain.pitch"); p.gRev = f ("grain.reverse"); p.gScan = f ("grain.scan"); p.gLevel = f ("grain.level");
@@ -990,24 +1024,121 @@ void DriftwerkProcessor::updateBlockParams()
 }
 
 //==============================================================================
-// Chord progression: four chords, each held for prog.bars bars. Run every sample so the
-// pads, drone, arp and CHORDS all change on the same sample, right on the bar line.
+// Chord progression. Runs every sample so the pads, drone, arp and CHORDS all change on the
+// same sample, right on the bar line. The chord itself is only rebuilt when it changes.
 void DriftwerkProcessor::applyProgression (double beat)
 {
-    if (p.progMode > 0)
+    using namespace harm;
+    const int mode = p.progMode;
+    const double even = 4.0 * p.progBars;              // beats per chord at EVEN (CHANGE EVERY)
+    int idx = -1;
+    long long code = 0;                                 // which chord of this mode
+    double phase = 0.0;
+    if (mode == 0)
+        code = 0;
+    else if (mode <= progTableLast)
     {
-        const int family = (p.scale == 6 || p.scale == 7) ? 1 : 0;
-        const int idx = (int) std::floor (beat / (4.0 * p.progBars)) & 3;
-        const auto& c = progTable[p.progMode][family][idx];
-        chordOffsetTarget = c.offset > 6 ? c.offset - 12 : c.offset;   // keep roots close: move down rather than far up
-        p.dreamChord = c.dream;
-        p.droneChord = c.drone;
-        if (progIndex.load (std::memory_order_relaxed) != idx) progIndex.store (idx, std::memory_order_relaxed);
+        const double u = beat / even, f = std::floor (u);
+        idx = (int) ((long long) f & 3);
+        phase = u - f;
+        code = idx;
+    }
+    else if (mode == progWander)
+    {
+        advanceWander (beat, even);
+        idx = juce::jmax (0, wanderCount.load (std::memory_order_relaxed) - 1);
+        phase = (beat - wanderStart) / wanderLen;
+        code = wanderCur;
     }
     else
     {
-        chordOffsetTarget = 0;
-        if (progIndex.load (std::memory_order_relaxed) != -1) progIndex.store (-1, std::memory_order_relaxed);
+        // MY CHORDS: LENGTH chords, each as long as its own length; the loop starts at beat 0.
+        auto slotBeats = [&] (int k) { return p.slotLen[k] == 0 ? even : slotLenBeats[p.slotLen[k]]; };
+        double total = 0.0;
+        for (int k = 0; k < p.progLen; ++k) total += slotBeats (k);
+        double pos = std::fmod (beat, total);
+        if (pos < 0.0) pos += total;
+        idx = p.progLen - 1;
+        for (int k = 0; k < p.progLen; ++k)
+        {
+            const double len = slotBeats (k);
+            if (pos < len) { idx = k; phase = pos / len; break; }
+            pos -= len;
+        }
+        code = p.slotDeg[idx] * 16 + p.slotType[idx];
+    }
+    if (mode != progWander) wanderOn = false;
+    progPhaseNow = (float) juce::jlimit (0.0, 1.0, phase);
+
+    const long long key = ((((((long long) mode * 16 + p.scale) * 8 + p.progColour) * 8 + p.droneChordUser) * 8
+                            + p.dreamChordUser) * 1024) + code;
+    if (key != harmKey)
+    {
+        harmKey = key;
+        if (mode == 0)                curHarm = staticChord (p.scale, p.progColour, p.dreamChordUser, p.droneChordUser);
+        else if (mode <= progTableLast) curHarm = tableChord (mode, p.scale, idx, p.progColour, p.droneChordUser);
+        else if (mode == progWander)  curHarm = codeChord (p.scale, wanderCur, p.progColour, p.droneChordUser);
+        else                          curHarm = slotChord (p.scale, p.slotDeg[idx], p.slotType[idx], p.progColour, p.droneChordUser);
+        chordIvMask.store (curHarm.ivMask(), std::memory_order_relaxed);
+        progOffset.store (curHarm.offset, std::memory_order_relaxed);
+    }
+    chordOffsetTarget = curHarm.offset;
+    p.dreamChord = curHarm.dream >= 0 ? curHarm.dream : p.dreamChordUser;
+    p.droneChord = curHarm.drone;
+    if (progIndex.load (std::memory_order_relaxed) != idx) progIndex.store (idx, std::memory_order_relaxed);
+}
+
+void DriftwerkProcessor::pushWander (int code)
+{
+    const int n = wanderCount.load (std::memory_order_relaxed);
+    if (n < harm::maxSlots)
+    {
+        wanderHist[(size_t) n].store (code, std::memory_order_relaxed);
+        wanderCount.store (n + 1, std::memory_order_relaxed);
+        return;
+    }
+    for (int k = 0; k + 1 < harm::maxSlots; ++k)
+        wanderHist[(size_t) k].store (wanderHist[(size_t) k + 1].load (std::memory_order_relaxed), std::memory_order_relaxed);
+    wanderHist[harm::maxSlots - 1].store (code, std::memory_order_relaxed);
+}
+
+// How long the next WANDER chord lasts, from RHYTHM.
+double DriftwerkProcessor::wanderDuration (double even)
+{
+    const float r = juce::jlimit (0.0f, 0.999f, wanderRng.next() * 0.5f + 0.5f);
+    double d = even;
+    if (p.progRhythm == 1) d = r < 0.25f ? even * 2.0 : even;                                     // GENTLE
+    else if (p.progRhythm == 2) { const double m[] { 0.5, 1.0, 1.0, 2.0 }; d = even * m[(int) (r * 4.0f)]; }   // VARIED
+    else if (p.progRhythm == 3) { const double m[] { 0.25, 0.5, 0.5, 1.0 }; d = even * m[(int) (r * 4.0f)]; } // RESTLESS
+    return juce::jmax (2.0, d);
+}
+
+void DriftwerkProcessor::advanceWander (double beat, double even)
+{
+    auto rnd = [this] { return juce::jlimit (0.0f, 1.0f, wanderRng.next() * 0.5f + 0.5f); };
+    if (! wanderOn || beat < wanderStart - 1.0e-6 || beat > wanderStart + wanderLen + 64.0)
+    {
+        // Start on this bar from the home chord, or carry on from here after a jump in the song.
+        wanderStart = std::floor (beat / 4.0) * 4.0;
+        if (! wanderOn)
+        {
+            wanderCount.store (0, std::memory_order_relaxed);
+            wanderCur = 0 * 16 + harm::TNinth;
+            pushWander (wanderCur);
+        }
+        wanderLen = wanderDuration (even);
+        wanderNext = harm::wanderPick (p.scale, wanderCur, rnd);
+        wanderNextCode.store (wanderNext, std::memory_order_relaxed);
+        wanderOn = true;
+    }
+    while (beat >= wanderStart + wanderLen)
+    {
+        wanderStart += wanderLen;
+        wanderCur = wanderNext;
+        pushWander (wanderCur);
+        wanderLen = wanderDuration (even);
+        wanderNext = harm::wanderPick (p.scale, wanderCur, rnd);
+        wanderNextCode.store (wanderNext, std::memory_order_relaxed);
     }
 }
 
@@ -1017,9 +1148,7 @@ void DriftwerkProcessor::applyProgression (double beat)
 void DriftwerkProcessor::updateChordLayer()
 {
     const int keyRoot = p.root + midiTranspose;
-    const int dc = juce::jlimit (0, 5, p.dreamChord);
-    const int key = (((((((keyRoot + 64) * 32 + chordOffsetTarget + 12) * 8 + dc) * 8 + p.chdVoices) * 8 + (p.chdOct + 4)) * 16
-                     + p.scale) * 4 + p.arpFollow);
+    const long long key = (((harmKey * 128 + (keyRoot + 64)) * 8 + p.chdVoices) * 8 + (p.chdOct + 4)) * 4 + p.arpFollow;
     bool changed = false;
     if (key != chdLastKey)
     {
@@ -1031,7 +1160,7 @@ void DriftwerkProcessor::updateChordLayer()
         int n = 0;
         for (int k = 0; k < 6; ++k)
         {
-            const int iv = dreamChords[dc][k];
+            const int iv = curHarm.iv[k];
             const int pc = ((chordOffsetTarget + iv) % 12 + 12) % 12;
             const bool inScale = std::find (sc.begin(), sc.end(), pc) != sc.end();
             if (k == 0 || p.arpFollow != 0 || inScale) notes[n++] = root + (float) iv;
@@ -1043,6 +1172,8 @@ void DriftwerkProcessor::updateChordLayer()
     }
     chordNoteCount.store (p.chdOn ? chordLayer.numTargets : 0, std::memory_order_relaxed);
 
+    const int mode = juce::jlimit (0, chordStepsStyle, p.chdMode);
+    if (! p.chdOn || mode != chordStepsStyle) hitStepNow.store (-1, std::memory_order_relaxed);
     if (! p.chdOn)
     {
         if (chdWasOn) chordLayer.hold (false);
@@ -1050,7 +1181,6 @@ void DriftwerkProcessor::updateChordLayer()
         chdLastBeat = -1;
         return;
     }
-    const int mode = juce::jlimit (0, 4, p.chdMode);
     if (mode != chdLastMode || ! chdWasOn)
     {
         chordLayer.hold (false);
@@ -1080,7 +1210,76 @@ void DriftwerkProcessor::updateChordLayer()
             chdLastArpGate = g;
             break;
         }
-        default: if (unitChanged (4.0) || changed) chordLayer.strike ((int) spb, (int) (sr * 0.045)); break; // STRUM
+        case 4: if (unitChanged (4.0) || changed) chordLayer.strike ((int) spb, (int) (sr * 0.045)); break; // STRUM
+        default:                                                                                  // STEPS: the HITS pattern
+        {
+            if (changed) chordLayer.retarget();
+            const double rate = hitRateBeats[juce::jlimit (0, 4, p.chdRate)];
+            const long long u = (long long) std::floor (curBeat / rate);
+            if (u == chdLastBeat) break;
+            chdLastBeat = u;
+            const int steps = p.chdSteps;
+            const int st = (int) (((u % steps) + steps) % steps);
+            // VARY: at the top of each loop a few free steps get a new weight.
+            if (st == 0 && p.chdVary > 0.0f)
+                for (int i = 1; i < numHitSteps; ++i)
+                    if (hitForce[(size_t) i].load (std::memory_order_relaxed) == 0 && hitRng.next() * 0.5f + 0.5f < p.chdVary * 0.5f)
+                        hitWeight[(size_t) i].store (juce::jlimit (0.01f, 0.99f, hitRng.next() * 0.5f + 0.5f), std::memory_order_relaxed);
+            hitStepNow.store (st, std::memory_order_relaxed);
+            if (hitOn (st, p.chdDensity))
+            {
+                int gap = 1;                                    // GATE: a share of the time until the next hit
+                while (gap < steps && ! hitOn ((st + gap) % steps, p.chdDensity)) ++gap;
+                chordLayer.strike (juce::jmax (64, (int) ((double) gap * rate * spb * p.chdGate)), 0);
+            }
+            break;
+        }
+    }
+}
+
+bool DriftwerkProcessor::hitOn (int i, float density) const
+{
+    if (i < 0 || i >= numHitSteps) return false;
+    const int f = hitForce[(size_t) i].load (std::memory_order_relaxed);
+    if (f != 0) return f > 0;
+    if (i == 0) return density > 0.001f;                   // the first step anchors the pattern
+    return hitWeight[(size_t) i].load (std::memory_order_relaxed) < density;
+}
+
+bool DriftwerkProcessor::hitOnNow (int i) const { return hitOn (i, apvts.getRawParameterValue ("chd.density")->load()); }
+
+void DriftwerkProcessor::setHit (int i, bool on)
+{
+    if (i >= 0 && i < numHitSteps) hitForce[(size_t) i].store (on ? 1 : -1);
+}
+
+void DriftwerkProcessor::newHits()
+{
+    juce::Random r;
+    for (int i = 0; i < numHitSteps; ++i)
+    {
+        hitWeight[(size_t) i].store (i == 0 ? 0.0f : 0.01f + 0.98f * r.nextFloat());
+        hitForce[(size_t) i].store (0);
+    }
+}
+
+juce::String DriftwerkProcessor::getHitString() const
+{
+    juce::StringArray w, f;
+    for (int i = 0; i < numHitSteps; ++i) { w.add (juce::String (hitWeight[(size_t) i].load(), 3)); f.add (juce::String (hitForce[(size_t) i].load())); }
+    return w.joinIntoString (",") + "|" + f.joinIntoString (",");
+}
+
+void DriftwerkProcessor::setHitString (const juce::String& s)
+{
+    juce::StringArray parts, w, f;
+    parts.addTokens (s, "|", "");
+    if (parts.size() < 2) return;
+    w.addTokens (parts[0], ",", ""); f.addTokens (parts[1], ",", "");
+    for (int i = 0; i < numHitSteps; ++i)
+    {
+        if (i < w.size()) hitWeight[(size_t) i].store (juce::jlimit (0.0f, 1.0f, w[i].getFloatValue()));
+        if (i < f.size()) hitForce[(size_t) i].store (juce::jlimit (-1, 1, f[i].getIntValue()));
     }
 }
 
@@ -1326,7 +1525,7 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     // ---- DREAM + GRAIN (stereo, normalled straight to the master bus unless their OUT is patched)
     float dl = 0.0f, dr = 0.0f, gl = 0.0f, gr = 0.0f;
     {
-        const float dm = dream.process (dreamChords[juce::jlimit (0, 5, p.dreamChord)], 6, chordBase,
+        const float dm = dream.process (curHarm.iv, 6, chordBase,
                                         p.dreamRate, p.dreamTone, p.dreamWarp, dl, dr);
         outs[O_DREAM] = dm * p.dreamLevel * 1.6f;
         dl *= p.dreamLevel; dr *= p.dreamLevel;
@@ -1427,8 +1626,7 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         const float glideSec = (0.03f + p.progGlide * p.progGlide * 5.0f) * (p.progMode == 4 ? 2.0f : 1.0f);
         chordGlideCoef = onePoleCoef (glideSec / 4.0f, (float) sr);
         applyProgression (hostSynced ? hostPpqAtBlock : beatPos);
-        progChord.store (p.dreamChord);
-        progOffset.store (chordOffsetTarget);
+        keyPcNow.store ((((p.root + midiTranspose) % 12) + 12) % 12, std::memory_order_relaxed);
     }
 
     for (const auto meta : midi)
@@ -1496,6 +1694,7 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     }
     arpStep.store (arp.step);
     arpLength.store (p.length);
+    progPhase.store (progPhaseNow, std::memory_order_relaxed);
 
     // ---- WAV recording (the writer thread does the disk work)
     {
@@ -1566,6 +1765,7 @@ void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("program", currentProgram, nullptr);
     state.setProperty ("presetName", getPresetName (currentProgram), nullptr);
     state.setProperty ("seq", getSequenceString(), nullptr);
+    state.setProperty ("hits", getHitString(), nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
 }
@@ -1598,6 +1798,8 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
             currentProgram = juce::jlimit (0, getNumPresets() - 1, currentProgram);
             const juce::String seq = state.getProperty ("seq", {}).toString();
             if (seq.isNotEmpty()) setSequenceString (seq);
+            const juce::String hits = state.getProperty ("hits", {}).toString();
+            if (hits.isNotEmpty()) setHitString (hits);
         }
     }
 }
@@ -1611,11 +1813,10 @@ int DriftwerkProcessor::pitchSetFromParams (int* out) const
     const int follow = iv ("arp.follow");
     if (follow == 1)
     {
-        const int chord = progIndex.load() >= 0 ? progChord.load() : iv ("dream.chord");
-        bool has[12] {};
-        for (int k = 0; k < 6; ++k) has[dreamChords[juce::jlimit (0, 5, chord)][k] % 12] = true;
+        int m = chordIvMask.load();
+        if (m == 0) m = 1;
         int n = 0;
-        for (int k = 0; k < 12; ++k) if (has[k]) out[n++] = k;
+        for (int k = 0; k < 12; ++k) if ((m >> k) & 1) out[n++] = k;
         return n;
     }
     if (follow == 2) { out[0] = 0; out[1] = 7; return 2; }
@@ -1624,14 +1825,177 @@ int DriftwerkProcessor::pitchSetFromParams (int* out) const
     return (int) sc.size();
 }
 
-juce::String DriftwerkProcessor::progressionChordName (int k) const
+void DriftwerkProcessor::setParam (const juce::String& id, float realValue)
 {
+    if (auto* rp = apvts.getParameter (id))
+    {
+        const float v = rp->convertTo0to1 (realValue);
+        if (std::abs (rp->getValue() - v) < 1.0e-6f) return;
+        rp->beginChangeGesture();
+        rp->setValueNotifyingHost (v);
+        rp->endChangeGesture();
+    }
+}
+
+DriftwerkProcessor::ProgView DriftwerkProcessor::getProgressionView() const
+{
+    using namespace harm;
     auto iv = [this] (const char* id) { return (int) std::lround (apvts.getRawParameterValue (id)->load()); };
-    const int mode = juce::jlimit (0, 4, iv ("prog.mode"));
-    const int sc = iv ("arp.scale");
-    const auto& c = progTable[mode][(sc == 6 || sc == 7) ? 1 : 0][k & 3];
-    const auto name = juce::MidiMessage::getMidiNoteName (iv ("arp.root") + c.offset, true, false, 3);
-    return name + " " + dreamChordNames[c.dream].toLowerCase();
+    ProgView v;
+    v.mode = juce::jlimit (0, numProgModes - 1, iv ("prog.mode"));
+    v.scale = juce::jlimit (0, 7, iv ("arp.scale"));
+    v.keyPc = keyPcNow.load();
+    v.spell = Spelling (v.keyPc, v.scale);
+    v.keyName = keyName (v.spell);
+    v.phase = progPhase.load();
+    const int colour = iv ("prog.colour"), drone = iv ("drn.chord"), dc = iv ("dream.chord");
+    const double even = 4.0 * progBars[juce::jlimit (0, 4, iv ("prog.bars"))];
+    if (v.mode > 0 && v.mode <= progTableLast)
+    {
+        v.count = 4;
+        for (int k = 0; k < 4; ++k) { v.chords[k] = tableChord (v.mode, v.scale, k, colour, drone); v.beats[k] = even; }
+    }
+    else if (v.mode == progWander)
+    {
+        v.count = juce::jlimit (0, maxSlots, wanderCount.load());
+        for (int k = 0; k < v.count; ++k) { v.chords[k] = codeChord (v.scale, wanderHist[(size_t) k].load(), colour, drone); v.beats[k] = even; }
+        v.next = codeChord (v.scale, wanderNextCode.load(), colour, drone);
+    }
+    else if (v.mode == progMine)
+    {
+        v.count = juce::jlimit (2, maxSlots, iv ("prog.len") + 2);
+        for (int k = 0; k < v.count; ++k)
+        {
+            v.chords[k] = slotChord (v.scale, iv (slotDegIds[k]), iv (slotTypeIds[k]), colour, drone);
+            const int b = juce::jlimit (0, 6, iv (slotLenIds[k]));
+            v.beats[k] = b == 0 ? even : slotLenBeats[b];
+        }
+    }
+    if (v.count > 0)
+    {
+        v.current = v.mode == progWander ? v.count - 1 : juce::jlimit (0, v.count - 1, progIndex.load());
+        v.cur = v.chords[v.current];
+        if (v.mode != progWander) v.next = v.chords[(v.current + 1) % v.count];
+    }
+    else
+        v.cur = v.next = staticChord (v.scale, colour, dc, drone);
+    for (int k = 0; k < v.count; ++k)
+    {
+        v.names[k] = chordName (v.chords[k], v.spell);
+        v.numerals[k] = numeral (v.chords[k]);
+    }
+    v.curName = chordName (v.cur, v.spell);   v.curNumeral = numeral (v.cur);
+    v.nextName = chordName (v.next, v.spell); v.nextNumeral = numeral (v.next);
+    return v;
+}
+
+namespace
+{
+int nearestDegree (int scale, int offset)
+{
+    const auto& sc = harm::scaleOf (harm::parentScale (scale));
+    const int pc = ((offset % 12) + 12) % 12;
+    int best = 0, bestD = 99;
+    for (size_t k = 0; k < sc.size(); ++k)
+    {
+        const int d = std::min ((pc - sc[k] + 12) % 12, (sc[k] - pc + 12) % 12);
+        if (d < bestD) { bestD = d; best = (int) k; }
+    }
+    return best;
+}
+
+// MY CHORDS length option for a chord this many beats long (0 = EVEN).
+int lengthOption (double beats, double even)
+{
+    if (std::abs (beats - even) < 0.01) return 0;
+    int best = 1;
+    for (int b = 1; b < 7; ++b)
+        if (std::abs (std::log2 (harm::slotLenBeats[b] / beats)) < std::abs (std::log2 (harm::slotLenBeats[best] / beats))) best = b;
+    return best;
+}
+} // namespace
+
+void DriftwerkProcessor::setMyChord (int slot, int degree, int type, int length)
+{
+    if (slot < 0 || slot >= harm::maxSlots) return;
+    if (degree >= 0) setParam (slotDegIds[slot], (float) juce::jlimit (0, 6, degree));
+    if (type >= 0) setParam (slotTypeIds[slot], (float) juce::jlimit (0, harm::NumTypes - 1, type));
+    if (length >= 0) setParam (slotLenIds[slot], (float) juce::jlimit (0, 6, length));
+    const int len = (int) std::lround (apvts.getRawParameterValue ("prog.len")->load()) + 2;
+    if (slot >= len) setParam ("prog.len", (float) (slot + 1 - 2));
+}
+
+// EDIT THESE: whatever is playing becomes MY CHORDS, so each chord can be changed.
+void DriftwerkProcessor::copyProgressionToMine()
+{
+    using namespace harm;
+    const auto v = getProgressionView();
+    if (v.mode == progMine) return;
+    if (v.count > 0)
+    {
+        auto iv = [this] (const char* id) { return (int) std::lround (apvts.getRawParameterValue (id)->load()); };
+        const bool coloured = iv ("prog.colour") > 0;
+        const double even = 4.0 * progBars[juce::jlimit (0, 4, iv ("prog.bars"))];
+        Harm list[maxSlots];
+        double beats[maxSlots];
+        int n = 0;
+        for (int k = 0; k < v.count; ++k) { list[n] = v.chords[k]; beats[n++] = v.beats[k]; }
+        if (n < 2) { list[n] = v.next; beats[n++] = even; }
+        const int dreamType[] { TSeventh, TNinth, TSus2, TSeventh, TNinth, TQuartal };
+        for (int k = 0; k < n; ++k)
+        {
+            const auto& h = list[k];
+            const int deg = h.degree >= 0 ? h.degree : nearestDegree (v.scale, h.offset);
+            const int type = coloured ? 0 : (h.dream >= 0 ? dreamType[h.dream] : juce::jmax (1, h.type));
+            setMyChord (k, deg, type, lengthOption (beats[k], even));
+        }
+        setParam ("prog.len", (float) (n - 2));
+    }
+    setParam ("prog.mode", (float) progMine);
+}
+
+// NEW CHORDS: a fresh progression of LENGTH chords. Chords follow each other the way WANDER
+// moves; RHYTHM decides how long each one lasts.
+void DriftwerkProcessor::randomiseMyChords()
+{
+    using namespace harm;
+    juce::Random r;
+    auto rnd = [&r] { return r.nextFloat(); };
+    auto iv = [this] (const char* id) { return (int) std::lround (apvts.getRawParameterValue (id)->load()); };
+    const int scale = iv ("arp.scale"), rhythm = iv ("prog.rhythm");
+    const bool coloured = iv ("prog.colour") > 0;
+    const int n = juce::jlimit (2, maxSlots, iv ("prog.len") + 2);
+    const double even = 4.0 * progBars[juce::jlimit (0, 4, iv ("prog.bars"))];
+
+    int codes[maxSlots] { 0 * 16 + TNinth };
+    for (int k = 1; k < n; ++k)
+    {
+        int c = wanderPick (scale, codes[k - 1], rnd);
+        for (int tries = 0; k == n - 1 && tries < 8 && c / 16 == 0; ++tries) c = wanderPick (scale, codes[k - 1], rnd);
+        codes[k] = c;
+    }
+    int lens[maxSlots] {};
+    for (int k = 0; k < n; ++k)
+    {
+        double m = 1.0;
+        const int pick = r.nextInt (4);
+        if (rhythm == 1) m = r.nextFloat() < 0.25f ? 2.0 : 1.0;
+        else if (rhythm == 2) { const double ms[] { 0.5, 1.0, 1.0, 2.0 }; m = ms[pick]; }
+        else if (rhythm == 3) { const double ms[] { 0.25, 0.5, 0.5, 1.0 }; m = ms[pick]; }
+        lens[k] = lengthOption (juce::jlimit (2.0, 64.0, even * m), even);
+    }
+    // Keep the loop a whole number of bars: half-bar chords come in pairs.
+    int halves = 0, lastHalf = -1;
+    for (int k = 0; k < n; ++k) if (lens[k] == 1) { ++halves; lastHalf = k; }
+    if ((halves & 1) != 0 && lastHalf >= 0) lens[lastHalf] = 2;
+
+    for (int k = 0; k < n; ++k)
+    {
+        int type = 0;
+        if (! coloured) type = (k > 0 && r.nextFloat() < 0.15f) ? (int) TTriad : codes[k] % 16;
+        setMyChord (k, codes[k] / 16, type, lens[k]);
+    }
+    setParam ("prog.mode", (float) progMine);
 }
 
 int DriftwerkProcessor::maxDegree() const
@@ -1648,7 +2012,8 @@ juce::String DriftwerkProcessor::degreeName (int degree) const
     const int follow = (int) std::lround (apvts.getRawParameterValue ("arp.follow")->load());
     const int note = (int) std::lround (apvts.getRawParameterValue ("arp.root")->load()) + set[degree % n] + 12 * (degree / n)
                    + (follow != 0 ? progOffset.load() : 0) + (int) std::lround (apvts.getRawParameterValue ("arp.oct")->load()) * 12;
-    return juce::MidiMessage::getMidiNoteName (note, true, true, 3);
+    return harm::noteName (note, harm::Spelling ((int) std::lround (apvts.getRawParameterValue ("arp.root")->load()),
+                                                 (int) std::lround (apvts.getRawParameterValue ("arp.scale")->load())));
 }
 
 void DriftwerkProcessor::setStep (int i, int degree, bool on)

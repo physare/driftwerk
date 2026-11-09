@@ -829,7 +829,7 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     addAndMakeVisible (filesButton);
     screenButton.onClick = [this]
     {
-        if (auto* ed = findParentComponentOfClass<DriftwerkEditor>()) ed->toggleFullScreen();
+        if (onFullScreen) onFullScreen();
     };
     addAndMakeVisible (screenButton);
     fullButton.onClick = [this] { openFullCamera (true); };
@@ -1321,27 +1321,51 @@ PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view
             { "drn.air", "AIR" }, { "drn.sub", "SUB" } };
         for (int i = 0; i < 9; ++i) { const int c = i + 1; knob (k[i].first, k[i].second, Drone, 30 + (c % 5) * 132, 62 + (c / 5) * 104); }
     }
-    // ---- CHORDS tab
+    // ---- CHORDS tab: the sound along the top, the HITS pattern (style STEPS) below
     {
-        chordsOnButton.setBounds (30, 48, 92, 24);
+        chordsOnButton.setBounds (16, 46, 100, 24);
         chordsOnButton.setClickingTogglesState (true);
         chordsOnButton.getProperties().set ("accent", true);
         addAndMakeVisible (chordsOnButton);
         bAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "chd.on", chordsOnButton));
         tabbed.push_back ({ &chordsOnButton, Chords });
-        combo ("chd.mode", "STYLE", Chords, 30, 104, 92);
+        combo ("chd.mode", "STYLE", Chords, 16, 92, 100);
         const std::pair<const char*, const char*> k[] { { "chd.level", "LEVEL" }, { "chd.voices", "VOICES" }, { "chd.oct", "OCTAVE" },
             { "chd.wave", "COLOUR" }, { "chd.tone", "TONE" }, { "chd.attack", "ATTACK" }, { "chd.release", "RELEASE" }, { "chd.width", "WIDTH" } };
-        for (int i = 0; i < 8; ++i) { const int c = i + 1; knob (k[i].first, k[i].second, Chords, 30 + (c % 5) * 132, 62 + (c / 5) * 104); }
+        for (int i = 0; i < 8; ++i) knob (k[i].first, k[i].second, Chords, 124 + i * 70, 44);
+        combo ("chd.rate", "STEP", Chords, 130, 206, 70);
+        knob ("chd.steps", "STEPS", Chords, 206, 198);
+        knob ("chd.density", "DENSITY", Chords, 272, 198);
+        knob ("chd.gate", "GATE", Chords, 338, 198);
+        knob ("chd.vary", "VARY", Chords, 404, 198);
+        hitsNewButton.setBounds (506, 208, 56, 24);
+        hitsNewButton.onClick = [this]
+        {
+            proc.newHits();
+            proc.setParam ("chd.mode", 5.0f);
+            proc.setParam ("chd.on", 1.0f);
+            repaint();
+        };
+        addAndMakeVisible (hitsNewButton);
+        tabbed.push_back ({ &hitsNewButton, Chords });
     }
-    // ---- HARMONY tab
-    combo ("prog.mode", "PROGRESSION", Harmony, 20, 70, 120);
-    combo ("prog.bars", "CHANGE EVERY", Harmony, 152, 70, 100);
-    knob ("prog.glide", "CHORD GLIDE", Harmony, 280, 62);
-    combo ("scene.key", "NEW SCENE KEY", Harmony, 400, 70, 100);
-    combo ("arp.follow", "ARP FOLLOWS", Harmony, 520, 70, 90);
-    combo ("arp.scale", "SCALE", Harmony, 20, 168, 120);
-    knob ("arp.root", "KEY", Harmony, 166, 160);
+    // ---- HARMONY tab: settings on the left, the chord wheel in the middle, the chords of the loop on the right
+    combo ("prog.mode", "PROGRESSION", Harmony, 16, 44, 118);
+    combo ("prog.colour", "CHORD COLOUR", Harmony, 16, 94, 118);
+    combo ("prog.bars", "CHANGE EVERY", Harmony, 16, 144, 118);
+    combo ("arp.scale", "SCALE", Harmony, 146, 44, 100);
+    combo ("arp.follow", "ARP FOLLOWS", Harmony, 146, 94, 100);
+    combo ("scene.key", "NEW SCENE KEY", Harmony, 146, 144, 100);
+    knob ("arp.root", "KEY", Harmony, 28, 192);
+    knob ("prog.glide", "CHORD GLIDE", Harmony, 149, 192);
+    editChordsButton.setBounds (498, 168, 92, 24);
+    newChordsButton.setBounds (596, 168, 92, 24);
+    newChordsButton.getProperties().set ("accent", true);
+    editChordsButton.onClick = [this] { proc.copyProgressionToMine(); repaint(); };
+    newChordsButton.onClick = [this] { proc.randomiseMyChords(); repaint(); };
+    for (auto* b : { &editChordsButton, &newChordsButton }) { addAndMakeVisible (*b); tabbed.push_back ({ b, Harmony }); }
+    combo ("prog.len", "LENGTH", Harmony, 498, 210, 88);
+    combo ("prog.rhythm", "RHYTHM", Harmony, 600, 210, 88);
 
     setTab (Sequence);
 }
@@ -1392,6 +1416,7 @@ void PerformPanel::refresh()
         slotButtons[i].getProperties().set ("accent", proc.slotUsed (i));
         slotButtons[i].setToggleState (i == lastSlot, juce::dontSendNotification);
     }
+    if (tab == Harmony) animateWheel();
     if (tab == Sequence || tab == Harmony || tab == Chords) repaint();
 }
 
@@ -1408,15 +1433,55 @@ int PerformPanel::degAt (int y) const
     return juce::jlimit (0, maxDeg, juce::roundToInt ((float) (g.getBottom() - y) / (float) g.getHeight() * (float) maxDeg));
 }
 
+int PerformPanel::hitAt (int x) const
+{
+    const auto g = hitGrid();
+    return juce::jlimit (0, DriftwerkProcessor::numHitSteps - 1, (x - g.getX()) * DriftwerkProcessor::numHitSteps / g.getWidth());
+}
+
 void PerformPanel::mouseDown (const juce::MouseEvent& e)
 {
     dragCol = -1;
+    hitPaintCol = -1;
+    if (tab == Chords && hitGrid().contains (e.getPosition()))
+    {
+        // Click a step to force it on or off; drag to paint more. This plays the pattern (STEPS).
+        const int i = hitAt (e.x);
+        const int steps = (int) std::lround (proc.apvts.getRawParameterValue ("chd.steps")->load());
+        if (i >= steps) return;
+        hitPaintOn = ! proc.hitOnNow (i);
+        hitPaintCol = i;
+        proc.setHit (i, hitPaintOn);
+        proc.setParam ("chd.mode", 5.0f);
+        proc.setParam ("chd.on", 1.0f);
+        repaint();
+        return;
+    }
+    if (tab == Harmony)
+    {
+        const auto v = proc.getProgressionView();
+        for (int k = 0; k < harm::maxSlots; ++k)
+            if (chordBox (k).contains (e.getPosition()))
+            {
+                if (k < v.count) showChordMenu (k);
+                else if (v.mode == harm::progMine && k == v.count) { proc.setMyChord (k, harm::defaultDegrees[k], 0, 0); showChordMenu (k); }
+                return;
+            }
+        return;
+    }
     if (tab != Sequence || ! grid().contains (e.getPosition())) return;
     dragCol = colAt (e.x); dragStartY = e.y; dragMoved = false;
 }
 
 void PerformPanel::mouseDrag (const juce::MouseEvent& e)
 {
+    if (hitPaintCol >= 0)
+    {
+        const int i = hitAt (e.x);
+        const int steps = (int) std::lround (proc.apvts.getRawParameterValue ("chd.steps")->load());
+        if (i != hitPaintCol && i < steps) { hitPaintCol = i; proc.setHit (i, hitPaintOn); repaint(); }
+        return;
+    }
     if (dragCol < 0) return;
     if (! dragMoved && std::abs (e.y - dragStartY) < 4 && colAt (e.x) == dragCol) return;
     dragMoved = true;
@@ -1453,8 +1518,8 @@ void PerformPanel::paint (juce::Graphics& g)
     const char* subs[] { "HOLD keeps the pattern. Click a step on/off, drag to set its note, REC NOTES to play it in.",
                          "shapes the arp voice: VCO > VCF 1 > VCA 1 (in most presets)",
                          "TYPE: saws, organ, strings, glass or choir. COLOUR shapes each type (brightness, drawbars, width, shimmer, vowel).",
-                         "a chord layer that always plays the HARMONY chord, voice-led and in tune with the arp, drone and pads",
-                         "chords that move together: pads, drone and arp" };
+                         "plays the HARMONY chord, in tune with everything. STEPS plays the HITS pattern: DENSITY fills it, NEW reshuffles, VARY changes it each loop.",
+                         "circle of fifths in your key: lit notes are the chord now, the arrow points to the next one. Click a chord on the right to change it." };
     g.setColour (fg);
     g.setFont (dwui::font (15.0f));
     g.drawText (titles[tab], 14, 8, 200, 20, juce::Justification::left);
@@ -1507,62 +1572,418 @@ void PerformPanel::paint (juce::Graphics& g)
                     gr.getRight() - 220, 8, 220, 20, juce::Justification::right);
     }
     else if (tab == Chords)
+        paintChords (g);
+    else if (tab == Harmony)
+        paintHarmony (g);
+}
+
+void PerformPanel::paintChords (juce::Graphics& g)
+{
+    using namespace dwui;
+    auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const int style = juce::jlimit (0, 5, (int) std::lround (pv ("chd.mode")));
+    const bool on = pv ("chd.on") > 0.5f;
+
+    // The notes the chord layer is playing now.
     {
-        // The notes the chord layer is playing now.
         const int n = proc.chordNoteCount.load();
-        const auto area = juce::Rectangle<int> (30 + 4 * 132 - 10, 160, 140, 74);
+        const auto area = juce::Rectangle<int> (8, 146, 116, 110);
         g.setColour (fg3);
         g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
         g.drawText ("NOW PLAYING", area.withHeight (14), juce::Justification::centred);
         g.setFont (dwui::mono (12.0f));
         if (n == 0)
-        {
-            g.drawText ("off", area.withTrimmedTop (22).withHeight (18), juce::Justification::centred);
-        }
+            g.drawText ("off", area.withTrimmedTop (20).withHeight (18), juce::Justification::centred);
         else
         {
-            juce::StringArray names;
-            for (int i = 0; i < n; ++i) names.add (juce::MidiMessage::getMidiNoteName (proc.chordNotes[(size_t) i].load(), true, true, 3));
-            g.setColour (acid);
-            const int half = (n + 1) / 2;
+            const harm::Spelling sp (proc.keyPcNow.load(), (int) std::lround (pv ("arp.scale")));
             juce::StringArray a, b;
-            for (int i = 0; i < n; ++i) (i < half ? a : b).add (names[i]);
-            g.drawText (a.joinIntoString (" "), area.withTrimmedTop (22).withHeight (18), juce::Justification::centred);
-            g.drawText (b.joinIntoString (" "), area.withTrimmedTop (42).withHeight (18), juce::Justification::centred);
+            const int half = (n + 1) / 2;
+            for (int i = 0; i < n; ++i) (i < half ? a : b).add (harm::noteName (proc.chordNotes[(size_t) i].load(), sp));
+            g.setColour (acid);
+            g.drawText (a.joinIntoString (" "), area.withTrimmedTop (20).withHeight (18), juce::Justification::centred);
+            g.drawText (b.joinIntoString (" "), area.withTrimmedTop (38).withHeight (18), juce::Justification::centred);
         }
         g.setColour (fg3);
         g.setFont (dwui::font (10.0f));
-        const char* how[] { "held, gliding between chords", "swells in every 2 bars", "on every beat", "with every arp note", "strummed every bar" };
-        g.drawFittedText (how[juce::jlimit (0, 4, (int) std::lround (proc.apvts.getRawParameterValue ("chd.mode")->load()))],
-                          area.withTrimmedTop (62).withHeight (26), juce::Justification::centred, 2);
+        const char* how[] { "held, gliding between chords", "swells in every 2 bars", "on every beat", "with every arp note",
+                            "strummed every bar", "plays the HITS pattern" };
+        g.drawFittedText (how[style], area.withTrimmedTop (60).withHeight (28), juce::Justification::centred, 2);
     }
-    else if (tab == Harmony)
+
+    // The HITS pattern.
+    const auto gr = hitGrid();
+    const int steps = juce::jlimit (2, 16, (int) std::lround (pv ("chd.steps")));
+    const int cur = proc.hitStepNow.load();
+    const float gate = pv ("chd.gate");
+    const bool playing = on && style == 5;
+    g.setColour (fg2);
+    g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
+    g.drawText ("HITS", gr.getX(), 122, 100, 14, juce::Justification::left);
+    g.setColour (playing ? acid.withAlpha (0.8f) : fg3);
+    g.setFont (dwui::font (10.0f));
+    g.drawText (playing ? "playing: click steps to force them on or off" : "set STYLE to STEPS (or click a step) to play this pattern",
+                gr.getRight() - 360, 122, 360, 14, juce::Justification::right);
+
+    const int n = DriftwerkProcessor::numHitSteps;
+    const float cw = (float) gr.getWidth() / (float) n;
+    bool hit[16] {};
+    for (int i = 0; i < steps; ++i) hit[i] = proc.hitOnNow (i);
+    for (int i = 0; i < n; ++i)
     {
-        // The four chords of the progression, the one playing now lit.
-        const int mode = (int) std::lround (proc.apvts.getRawParameterValue ("prog.mode")->load());
-        const int idx = proc.progIndex.load();
-        g.setFont (dwui::font (11.0f));
-        g.setColour (fg3);
-        g.drawText (mode == 0 ? "progression off: pads and drone stay on one chord" : "now playing", 250, 168, 300, 16, juce::Justification::left);
-        if (mode > 0)
-            for (int k = 0; k < 4; ++k)
-            {
-                const auto r = juce::Rectangle<int> (250 + k * 104, 190, 96, 40);
-                const bool now = k == idx;
-                g.setColour (now ? acid : rule);
-                g.drawRect (r, 1);
-                if (now) { g.setColour (acid.withAlpha (0.15f)); g.fillRect (r.reduced (1)); }
-                g.setColour (now ? acid : fg2);
-                g.setFont (dwui::font (13.0f));
-                g.drawText (proc.progressionChordName (k), r, juce::Justification::centred);
-            }
+        const auto col = juce::Rectangle<float> (gr.getX() + cw * (float) i, (float) gr.getY(), cw, (float) gr.getHeight()).reduced (2.0f, 0.0f);
+        const bool inLen = i < steps;
+        g.setColour (juce::Colours::white.withAlpha (inLen ? 0.05f : 0.015f));
+        g.fillRect (col);
+        if (i == cur && inLen && playing) { g.setColour (acid.withAlpha (0.16f)); g.fillRect (col); }
     }
+    // How long each hit rings (GATE: a share of the time until the next hit).
+    for (int i = 0; i < steps; ++i)
+    {
+        if (! hit[i]) continue;
+        int gap = 1;
+        while (gap < steps && ! hit[(i + gap) % steps]) ++gap;
+        const float x0 = gr.getX() + cw * (float) i + 4.0f;
+        const float x1 = juce::jmin ((float) gr.getX() + cw * (float) steps - 3.0f, x0 + cw * (float) gap * gate - 6.0f);
+        g.setColour (acid.withAlpha (playing ? 0.28f : 0.12f));
+        g.fillRect (juce::Rectangle<float> (x0, (float) gr.getCentreY() - 3.0f, juce::jmax (2.0f, x1 - x0), 6.0f));
+    }
+    for (int i = 0; i < n; ++i)
+    {
+        const auto col = juce::Rectangle<float> (gr.getX() + cw * (float) i, (float) gr.getY(), cw, (float) gr.getHeight()).reduced (2.0f, 0.0f);
+        const bool inLen = i < steps;
+        const auto block = col.reduced (4.0f, 9.0f).withWidth (juce::jmin (12.0f, col.getWidth() - 8.0f));
+        if (inLen && hit[i])
+        {
+            g.setColour (acid.withAlpha (playing ? (i == cur ? 1.0f : 0.8f) : 0.35f));
+            g.fillRect (block);
+        }
+        else
+        {
+            g.setColour (fg3.withAlpha (inLen ? 0.6f : 0.2f));
+            g.drawRect (block, 1.0f);
+        }
+        const int force = proc.hitForce[(size_t) i].load();
+        if (inLen && force != 0)
+        {
+            g.setColour (force > 0 ? acid : fg3);
+            g.fillEllipse (col.getRight() - 7.0f, col.getY() + 3.0f, 4.0f, 4.0f);
+        }
+        if (i % 4 == 0)
+        {
+            g.setColour (fg3.withAlpha (inLen ? 0.8f : 0.3f));
+            g.setFont (dwui::mono (9.0f));
+            g.drawText (juce::String (i + 1), col.withTrimmedTop (col.getHeight() - 11.0f).toNearestInt(), juce::Justification::centredLeft);
+        }
+    }
+}
+
+void PerformPanel::animateWheel()
+{
+    // Chord tones glow in and out, arp notes flash, a ripple runs out when the chord changes.
+    const int keyPc = proc.keyPcNow.load();
+    const int mask = proc.chordIvMask.load();
+    const int root = ((keyPc + proc.progOffset.load()) % 12 + 12) % 12;
+    for (int pc = 0; pc < 12; ++pc)
+    {
+        const float t = ((mask >> ((pc - root + 12) % 12)) & 1) != 0 ? 1.0f : 0.0f;
+        pcGlow[pc] = lastChordSig < 0 ? t : pcGlow[pc] + (t - pcGlow[pc]) * 0.22f;   // lit straight away the first time
+    }
+    const int sig = root * 4096 + mask;
+    if (sig != lastChordSig) { if (lastChordSig >= 0) ripple = 0.0f; lastChordSig = sig; }
+    ripple = juce::jmin (1.0f, ripple + 0.035f);
+    const int ac = proc.arpNoteCount.load();
+    if (ac != lastArpCount)
+    {
+        if (lastArpCount >= 0 && proc.apvts.getRawParameterValue ("arp.on")->load() > 0.5f)
+        {
+            flashes[flashPos] = { proc.arpNotePc.load(), 0.0f };
+            flashPos = (flashPos + 1) % (int) std::size (flashes);
+        }
+        lastArpCount = ac;
+    }
+    for (auto& f : flashes) f.age = juce::jmin (1.0f, f.age + 0.07f);
+}
+
+void PerformPanel::paintHarmony (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto v = proc.getProgressionView();
+    const int keyPc = v.keyPc;
+    const auto& sc = harm::scaleOf (v.scale);
+    const auto& parent = harm::scaleOf (harm::parentScale (v.scale));
+    bool inScale[12] {};
+    for (int x : sc) inScale[(keyPc + x) % 12] = true;
+    const int curMask = proc.chordIvMask.load();
+    const int curRoot = ((keyPc + proc.progOffset.load()) % 12 + 12) % 12;
+    const int nextRoot = ((keyPc + v.next.offset) % 12 + 12) % 12;
+    const int nextMask = v.next.ivMask();
+    auto isTone = [] (int mask, int root, int pc) { return ((mask >> ((pc - root + 12) % 12)) & 1) != 0; };
+
+    const juce::Point<float> c (378.0f, 160.0f);
+    const float rLabel = 101.0f, rDot = 84.0f, rArrow = 72.0f, rNum = 61.0f, rMid = 40.0f;
+    auto angleOf = [keyPc] (int pc)
+    {
+        const int j = (((pc - keyPc) * 7) % 12 + 12) % 12;      // steps round the circle of fifths from the key
+        return -juce::MathConstants<float>::halfPi + (float) j * juce::MathConstants<float>::twoPi / 12.0f;
+    };
+    auto at = [&c] (float a, float r) { return c + juce::Point<float> (std::cos (a), std::sin (a)) * r; };
+
+    // Rings
+    g.setColour (rule);
+    g.drawEllipse (c.x - rDot, c.y - rDot, rDot * 2.0f, rDot * 2.0f, 1.0f);
+    g.setColour (rule.withAlpha (0.5f));
+    g.drawEllipse (c.x - rNum - 9.0f, c.y - rNum - 9.0f, (rNum + 9.0f) * 2.0f, (rNum + 9.0f) * 2.0f, 1.0f);
+
+    // The key's notes: one arc round the wheel.
+    for (int pc = 0; pc < 12; ++pc)
+        if (inScale[pc] && inScale[(pc + 7) % 12])
+        {
+            juce::Path arc;
+            arc.addCentredArc (c.x, c.y, rDot, rDot, 0.0f, angleOf (pc) + juce::MathConstants<float>::halfPi,
+                               angleOf ((pc + 7) % 12) + juce::MathConstants<float>::halfPi, true);
+            g.setColour (fg3.withAlpha (0.55f));
+            g.strokePath (arc, juce::PathStrokeType (2.2f));
+        }
+
+    // Shapes: the next chord dashed, the chord playing now lit.
+    auto shape = [&] (int mask, int root)
+    {
+        juce::Path p;
+        bool first = true;
+        for (int j = 0; j < 12; ++j)
+        {
+            const int pc = (keyPc + 7 * j) % 12;
+            if (! isTone (mask, root, pc)) continue;
+            const auto pt = at (angleOf (pc), rDot);
+            if (first) p.startNewSubPath (pt); else p.lineTo (pt);
+            first = false;
+        }
+        p.closeSubPath();
+        return p;
+    };
+    if (v.mode != 0 && (nextMask != curMask || nextRoot != curRoot))
+    {
+        juce::Path dashed;
+        const float dashes[] { 3.0f, 4.0f };
+        juce::PathStrokeType (1.0f).createDashedStroke (dashed, shape (nextMask, nextRoot), dashes, 2);
+        g.setColour (fg2.withAlpha (0.4f));
+        g.fillPath (dashed);
+    }
+    {
+        const auto p = shape (curMask, curRoot);
+        const float in = juce::jmin (1.0f, ripple * 3.0f);
+        g.setColour (acid.withAlpha (0.10f * in));
+        g.fillPath (p);
+        g.setColour (acid.withAlpha (0.65f * in));
+        g.strokePath (p, juce::PathStrokeType (1.3f));
+    }
+
+    // Where the chord goes next: an arrow round the inside, a dot travelling along it as the chord plays.
+    if (v.mode != 0 && nextRoot != curRoot)
+    {
+        const float a0 = angleOf (curRoot);
+        float a1 = angleOf (nextRoot);
+        while (a1 - a0 > juce::MathConstants<float>::pi) a1 -= juce::MathConstants<float>::twoPi;
+        while (a0 - a1 > juce::MathConstants<float>::pi) a1 += juce::MathConstants<float>::twoPi;
+        juce::Path arc;
+        arc.addCentredArc (c.x, c.y, rArrow, rArrow, 0.0f, a0 + juce::MathConstants<float>::halfPi, a1 + juce::MathConstants<float>::halfPi, true);
+        g.setColour (fg2.withAlpha (0.5f));
+        g.strokePath (arc, juce::PathStrokeType (1.2f));
+        const float dir = a1 > a0 ? 1.0f : -1.0f;
+        const auto tip = at (a1, rArrow);
+        const auto back = at (a1 - dir * 0.16f, rArrow);
+        const auto side = juce::Point<float> (tip.y - back.y, back.x - tip.x) * 0.45f;
+        juce::Path head;
+        head.addTriangle (tip, back + side, back - side);
+        g.fillPath (head);
+        const auto dot = at (a0 + (a1 - a0) * v.phase, rArrow);
+        drawGlowDot (g, dot, 0.9f, 2.4f);
+    }
+
+    // Notes round the outside, the chord's notes glowing.
+    for (int pc = 0; pc < 12; ++pc)
+    {
+        const float a = angleOf (pc);
+        const float glow = pcGlow[pc];
+        const auto d = at (a, rDot);
+        if (glow > 0.03f) drawGlowDot (g, d, glow, 3.0f + 2.0f * glow);
+        else
+        {
+            g.setColour (inScale[pc] ? fg2 : fg3.withAlpha (0.35f));
+            const float r = inScale[pc] ? 2.4f : 1.5f;
+            g.fillEllipse (d.x - r, d.y - r, r * 2.0f, r * 2.0f);
+        }
+        const auto lp = at (a, rLabel);
+        g.setFont (dwui::font (glow > 0.5f ? 12.5f : 11.0f, glow > 0.5f));
+        g.setColour (glow > 0.5f ? acid : (inScale[pc] ? fg2 : fg3.withAlpha (0.4f)));
+        g.drawText (v.spell (pc), juce::Rectangle<float> (lp.x - 16.0f, lp.y - 8.0f, 32.0f, 16.0f), juce::Justification::centred);
+    }
+    // Arp notes flash where they land.
+    for (const auto& f : flashes)
+        if (f.age < 1.0f)
+        {
+            const auto d = at (angleOf (f.pc), rDot);
+            const float r = 4.0f + 11.0f * f.age;
+            g.setColour (acid.withAlpha (0.75f * (1.0f - f.age)));
+            g.drawEllipse (d.x - r, d.y - r, r * 2.0f, r * 2.0f, 1.4f);
+        }
+
+    // Roman numerals: the chord on each note of the key.
+    for (int d = 0; d < (int) parent.size(); ++d)
+    {
+        const int pc = (keyPc + parent[(size_t) d]) % 12;
+        const auto np = at (angleOf (pc), rNum);
+        const bool now = pc == curRoot && v.cur.degree == d;
+        g.setFont (dwui::font (now ? 11.5f : 9.5f, now));
+        g.setColour (now ? acid : fg3);
+        g.drawText (harm::numeral (harm::diatonic (v.scale, d, harm::TTriad, 1)),
+                    juce::Rectangle<float> (np.x - 14.0f, np.y - 7.0f, 28.0f, 14.0f), juce::Justification::centred);
+    }
+
+    // A ripple when the chord changes.
+    if (ripple < 1.0f)
+    {
+        const float r = rMid + (rDot - rMid) * ripple;
+        g.setColour (acid.withAlpha (0.45f * (1.0f - ripple)));
+        g.drawEllipse (c.x - r, c.y - r, r * 2.0f, r * 2.0f, 1.5f);
+    }
+
+    // The middle: the chord, its numeral, the key, and how far through the chord we are.
+    g.setColour (juce::Colours::black.withAlpha (0.85f));
+    g.fillEllipse (c.x - rMid, c.y - rMid, rMid * 2.0f, rMid * 2.0f);
+    g.setColour (rule);
+    g.drawEllipse (c.x - rMid, c.y - rMid, rMid * 2.0f, rMid * 2.0f, 1.0f);
+    if (v.mode != 0)
+    {
+        juce::Path prog;
+        prog.addCentredArc (c.x, c.y, rMid + 3.5f, rMid + 3.5f, 0.0f, 0.0f, juce::MathConstants<float>::twoPi * juce::jlimit (0.0f, 1.0f, v.phase), true);
+        g.setColour (acid.withAlpha (0.7f));
+        g.strokePath (prog, juce::PathStrokeType (2.0f));
+    }
+    g.setColour (acid);
+    g.setFont (dwui::font (17.0f));
+    g.drawFittedText (v.curName, juce::Rectangle<int> ((int) c.x - 36, (int) c.y - 19, 72, 20), juce::Justification::centred, 1, 0.6f);
+    g.setColour (fg2);
+    g.setFont (dwui::font (11.0f));
+    g.drawText (v.curNumeral, juce::Rectangle<int> ((int) c.x - 30, (int) c.y + 1, 60, 14), juce::Justification::centred);
+    g.setColour (fg3);
+    g.setFont (dwui::font (8.5f));
+    g.drawFittedText (v.keyName, juce::Rectangle<int> ((int) c.x - 29, (int) c.y + 15, 58, 12), juce::Justification::centred, 1, 0.65f);
+
+    // The chords of the loop.
+    const char* caption = v.mode == 0 ? "PROGRESSION OFF: ONE CHORD"
+                        : v.mode == harm::progWander ? "WANDER: THE CHORDS SO FAR"
+                        : v.mode == harm::progMine ? "MY CHORDS: CLICK ONE TO CHANGE IT" : "THE LOOP: CLICK A CHORD TO EDIT";
+    g.setColour (fg3);
+    g.setFont (dwui::font (9.5f).withExtraKerningFactor (0.06f));
+    g.drawText (caption, 498, 42, 192, 14, juce::Justification::left);
+    double longest = 1.0;
+    for (int k = 0; k < v.count; ++k) longest = juce::jmax (longest, v.beats[k]);
+    for (int k = 0; k < harm::maxSlots; ++k)
+    {
+        const auto r = chordBox (k);
+        if (k >= v.count)
+        {
+            if (v.mode == harm::progMine && k == v.count)
+            {
+                g.setColour (fg3.withAlpha (0.5f));
+                g.drawRect (r, 1);
+                g.setFont (dwui::font (16.0f));
+                g.drawText ("+", r, juce::Justification::centred);
+            }
+            continue;
+        }
+        const bool now = k == v.current;
+        g.setColour (now ? acid : rule);
+        g.drawRect (r, 1);
+        if (now) { g.setColour (acid.withAlpha (0.14f)); g.fillRect (r.reduced (1)); }
+        g.setColour (now ? acid : fg);
+        g.setFont (dwui::font (12.0f));
+        g.drawFittedText (v.names[k], r.withHeight (22).withTrimmedTop (3).reduced (2, 0), juce::Justification::centred, 1, 0.55f);
+        g.setColour (now ? acid.withAlpha (0.8f) : fg3);
+        g.setFont (dwui::font (9.5f));
+        g.drawText (v.numerals[k], r.withTrimmedTop (21).withHeight (12), juce::Justification::centred);
+        // Length bar: how long this chord lasts, filling up while it plays.
+        const float w = (float) (r.getWidth() - 8) * (float) (v.beats[k] / longest);
+        const auto bar = juce::Rectangle<float> ((float) r.getX() + 4.0f, (float) r.getBottom() - 5.0f, w, 2.0f);
+        g.setColour (fg3.withAlpha (0.6f));
+        g.fillRect (bar);
+        if (now) { g.setColour (acid); g.fillRect (bar.withWidth (w * v.phase)); }
+    }
+    g.setFont (dwui::font (10.5f));
+    if (v.mode == 0)
+    {
+        g.setColour (fg3);
+        g.drawFittedText ("pick a PROGRESSION, or press NEW CHORDS to make one of your own", juce::Rectangle<int> (498, 64, 190, 60),
+                          juce::Justification::centredLeft, 3);
+    }
+    else
+    {
+        g.setColour (fg3);
+        g.drawText ("next", 498, 150, 30, 14, juce::Justification::left);
+        g.setColour (fg);
+        g.drawText (v.nextName + "   " + v.nextNumeral, 530, 150, 158, 14, juce::Justification::left);
+    }
+}
+
+void PerformPanel::showChordMenu (int k)
+{
+    // Editing a chord turns the progression into MY CHORDS first, so nothing else changes.
+    if (proc.getProgressionView().mode != harm::progMine) proc.copyProgressionToMine();
+    const auto v = proc.getProgressionView();
+    if (k < 0 || k >= v.count) return;
+    auto iv = [this] (const juce::String& id) { return (int) std::lround (proc.apvts.getRawParameterValue (id)->load()); };
+    const juce::String n (k + 1);
+    const int deg = iv ("prog.d" + n), type = iv ("prog.t" + n), len = iv ("prog.b" + n);
+    const int colour = iv ("prog.colour"), drone = iv ("drn.chord");
+
+    juce::PopupMenu m;
+    m.addSectionHeader ("CHORD " + n);
+    for (int d = 0; d < 7; ++d)
+    {
+        const auto h = harm::slotChord (v.scale, d, type, colour, drone);
+        m.addItem (100 + d, harm::numeral (h) + "    " + harm::chordName (h, v.spell), true, d == deg);
+    }
+    m.addColumnBreak();
+    m.addSectionHeader ("TYPE");
+    for (int t = 0; t < harm::NumTypes; ++t)
+        m.addItem (200 + t, t == 0 ? juce::String ("COLOUR (follows CHORD COLOUR)") : harm::slotTypeNames[t], true, t == type);
+    m.addColumnBreak();
+    m.addSectionHeader ("LENGTH");
+    for (int b = 0; b < 7; ++b)
+        m.addItem (300 + b, b == 0 ? juce::String ("EVEN (CHANGE EVERY)") : harm::slotLenNames[b], true, b == len);
+    m.addSeparator();
+    m.addItem (400, "remove this chord", v.count > 2);
+
+    juce::Component::SafePointer<PerformPanel> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (this).withTargetScreenArea (localAreaToGlobal (chordBox (k))),
+                     [safe, k, count = v.count] (int result)
+    {
+        if (safe == nullptr || result <= 0) return;
+        auto& p = safe->proc;
+        if (result >= 400)
+        {
+            for (int j = k; j + 1 < count; ++j)
+            {
+                const juce::String a (j + 1), b (j + 2);
+                auto get = [&p] (const juce::String& id) { return (int) std::lround (p.apvts.getRawParameterValue (id)->load()); };
+                p.setMyChord (j, get ("prog.d" + b), get ("prog.t" + b), get ("prog.b" + b));
+            }
+            p.setParam ("prog.len", (float) (count - 1 - 2));
+        }
+        else if (result >= 300) p.setMyChord (k, -1, -1, result - 300);
+        else if (result >= 200) p.setMyChord (k, -1, result - 200, -1);
+        else p.setMyChord (k, result - 100, -1, -1);
+        safe->repaint();
+    });
 }
 
 //==============================================================================
 DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p) : AudioProcessorEditor (&p), view (p)
 {
     addAndMakeVisible (view);
+    view.onFullScreen = [this] { toggleFullScreen(); };
     setResizable (true, true);
     setResizeLimits (MainView::designW / 3, MainView::designH / 3, MainView::designW * 2, MainView::designH * 2);
     if (auto* c = getConstrainer()) c->setFixedAspectRatio ((double) MainView::designW / (double) MainView::designH);
@@ -1579,38 +2000,84 @@ DriftwerkEditor::DriftwerkEditor (DriftwerkProcessor& p) : AudioProcessorEditor 
     setSize ((int) (MainView::designW * fit), (int) (MainView::designH * fit));
 }
 
-// FULL SCREEN: the standalone app goes truly full screen; inside a host (Ableton) the plugin
-// window grows to fill the screen. Click again, or press Esc / F11, to go back.
+DriftwerkEditor::~DriftwerkEditor()
+{
+    if (fsWindow != nullptr) fsWindow->removeChildComponent (&view);
+    fsWindow = nullptr;
+    if (full && juce::Desktop::getInstance().getKioskModeComponent() != nullptr)
+        juce::Desktop::getInstance().setKioskModeComponent (nullptr);
+}
+
+// FULL SCREEN. The standalone app's own window goes full screen. Inside a host (Ableton) the
+// plugin window can't cover the screen, so the whole rack moves into a borderless window of its
+// own over the whole display, and back again on Esc, F11 or EXIT FULL.
 void DriftwerkEditor::toggleFullScreen()
 {
+    // Switch on the next turn of the message loop: the click or key that asked for it may come
+    // from inside the window that is about to go away.
+    juce::Component::SafePointer<DriftwerkEditor> safe (this);
+    juce::MessageManager::callAsync ([safe] { if (safe != nullptr) safe->setFull (! safe->full); });
+}
+
+void DriftwerkEditor::setFull (bool on)
+{
+    if (on == full) return;
     auto* top = getTopLevelComponent();
     const bool standalone = processor.wrapperType == juce::AudioProcessor::wrapperType_Standalone;
-    if (! full)
+    if (on)
     {
-        normalBounds = getBounds();
         if (standalone && top != nullptr && top != this)
             juce::Desktop::getInstance().setKioskModeComponent (top, false);
-        else if (auto* d = juce::Desktop::getInstance().getDisplays().getDisplayForRect (getScreenBounds()))
+        else
         {
-            // Leave room for the host's window title bar; keep the rack's shape.
-            const auto area = d->userArea;
-            const double fit = juce::jmin (area.getWidth() / (double) MainView::designW,
-                                           (area.getHeight() - 34) / (double) MainView::designH);
-            setSize ((int) (MainView::designW * fit), (int) (MainView::designH * fit));
-            if (top != nullptr && top != this && top->isOnDesktop())
-                top->setTopLeftPosition (area.getX() + (area.getWidth() - top->getWidth()) / 2, area.getY());
+            const auto& displays = juce::Desktop::getInstance().getDisplays();
+            const auto* d = displays.getDisplayForRect (getScreenBounds());
+            const auto area = d != nullptr ? d->totalArea : displays.getTotalBounds (true);
+            fsWindow = std::make_unique<FullScreenWindow> (*this);
+            removeChildComponent (&view);
+            fsWindow->addAndMakeVisible (view);
+            fsWindow->setBounds (area);
+            if (fullScreenOnDesktop)
+            {
+                fsWindow->addToDesktop (juce::ComponentPeer::windowAppearsOnTaskbar);
+                fsWindow->setVisible (true);
+                fsWindow->toFront (true);
+                fsWindow->grabKeyboardFocus();
+            }
         }
-        full = true;
     }
     else
     {
-        if (standalone && juce::Desktop::getInstance().getKioskModeComponent() != nullptr)
+        if (fsWindow != nullptr)
+        {
+            fsWindow->removeChildComponent (&view);
+            fsWindow = nullptr;
+            addAndMakeVisible (view);
+            resized();
+        }
+        else if (juce::Desktop::getInstance().getKioskModeComponent() != nullptr)
             juce::Desktop::getInstance().setKioskModeComponent (nullptr);
-        else if (! normalBounds.isEmpty())
-            setSize (normalBounds.getWidth(), normalBounds.getHeight());
-        full = false;
     }
+    full = on;
     view.setFullScreenLabel (full);
+    repaint();
+}
+
+void DriftwerkEditor::paint (juce::Graphics& g)
+{
+    g.fillAll (juce::Colours::black);
+    if (fsWindow != nullptr)
+    {
+        g.setColour (dwui::fg2);
+        g.setFont (dwui::font (16.0f));
+        g.drawFittedText ("Timewind is full screen.\nPress Esc there, or click here, to bring it back.",
+                          getLocalBounds().reduced (20), juce::Justification::centred, 3);
+    }
+}
+
+void DriftwerkEditor::mouseDown (const juce::MouseEvent&)
+{
+    if (fsWindow != nullptr) toggleFullScreen();
 }
 
 bool DriftwerkEditor::keyPressed (const juce::KeyPress& k)
@@ -1619,13 +2086,38 @@ bool DriftwerkEditor::keyPressed (const juce::KeyPress& k)
     return false;
 }
 
+void DriftwerkEditor::fitInto (juce::Component& c, juce::Rectangle<int> area)
+{
+    // Fit the whole rack inside the area whatever its shape, centred.
+    const float scale = juce::jmin ((float) area.getWidth() / (float) MainView::designW,
+                                    (float) area.getHeight() / (float) MainView::designH);
+    const float ox = (float) area.getX() + ((float) area.getWidth()  - MainView::designW * scale) * 0.5f;
+    const float oy = (float) area.getY() + ((float) area.getHeight() - MainView::designH * scale) * 0.5f;
+    c.setTransform (juce::AffineTransform::scale (scale).translated (ox, oy));
+    c.setBounds (0, 0, MainView::designW, MainView::designH);
+}
+
+FullScreenWindow::FullScreenWindow (DriftwerkEditor& e) : editor (e)
+{
+    setName ("Timewind");
+    setOpaque (true);
+    setWantsKeyboardFocus (true);
+}
+
+void FullScreenWindow::resized()
+{
+    if (getNumChildComponents() > 0) DriftwerkEditor::fitInto (*getChildComponent (0), getLocalBounds());
+}
+
+bool FullScreenWindow::keyPressed (const juce::KeyPress& k)
+{
+    if (k == juce::KeyPress::F11Key || k == juce::KeyPress::escapeKey) { editor.toggleFullScreen(); return true; }
+    return false;
+}
+
+void FullScreenWindow::userTriedToCloseWindow() { editor.toggleFullScreen(); }
+
 void DriftwerkEditor::resized()
 {
-    // Fit the whole rack inside the window whatever shape the host gives us, centred.
-    const float scale = juce::jmin ((float) getWidth() / (float) MainView::designW,
-                                    (float) getHeight() / (float) MainView::designH);
-    const float ox = ((float) getWidth()  - MainView::designW * scale) * 0.5f;
-    const float oy = ((float) getHeight() - MainView::designH * scale) * 0.5f;
-    view.setTransform (juce::AffineTransform::scale (scale).translated (ox, oy));
-    view.setBounds (0, 0, MainView::designW, MainView::designH);
+    if (view.getParentComponent() == this) fitInto (view, getLocalBounds());
 }

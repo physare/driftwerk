@@ -183,7 +183,8 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment>> cAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> bAtt;
     juce::TextButton tabButtons[NumTabs];
-    juce::TextButton chordsOnButton { "CHORDS ON" };
+    juce::TextButton chordsOnButton { "CHORDS ON" }, hitsNewButton { "NEW" };
+    juce::TextButton editChordsButton { "EDIT THESE" }, newChordsButton { "NEW CHORDS" };
     juce::TextButton holdButton { "HOLD" }, recButton { "REC NOTES" }, newButton { "NEW" }, clearButton { "CLEAR" },
                      leftButton { "<" }, rightButton { ">" }, saveButton { "SAVE" };
     juce::TextButton slotButtons[DriftwerkProcessor::numSlots];
@@ -195,6 +196,23 @@ private:
     int colAt (int x) const;
     int degAt (int y) const;
     int dragCol = -1, dragStartY = 0; bool dragMoved = false;
+
+    // CHORDS tab: the HITS pattern
+    juce::Rectangle<int> hitGrid() const { return { 130, 138, 558, 50 }; }
+    int hitAt (int x) const;
+    int hitPaintCol = -1; bool hitPaintOn = true;
+    void paintChords (juce::Graphics&);
+
+    // HARMONY tab: the chord wheel and the chords of the loop
+    juce::Rectangle<int> chordBox (int k) const { return { 498 + (k % 4) * 48, 58 + (k / 4) * 46, 44, 40 }; }
+    void paintHarmony (juce::Graphics&);
+    void showChordMenu (int k);
+    void animateWheel();
+    float pcGlow[12] {}, nextGlow[12] {};
+    struct Flash { int pc = 0; float age = 1.0f; };
+    Flash flashes[10];
+    int flashPos = 0, lastArpCount = -1, lastChordSig = -1;
+    float ripple = 1.0f;
 };
 
 //==============================================================================
@@ -227,6 +245,7 @@ public:
     void showFullCamera() { openFullCamera (true); } // used by the offline render tool
     void showPerformTab (int t);
     void setFullScreenLabel (bool isFull);
+    std::function<void()> onFullScreen;                    // set by the editor
     void advanceSlime (int steps) { for (int i = 0; i < steps; ++i) slime->advance(); }
 
     DriftwerkProcessor& proc;
@@ -297,19 +316,38 @@ private:
 };
 
 //==============================================================================
+// FULL SCREEN inside a host: a borderless window of its own over the whole screen. The rack
+// moves into it and comes back to the plugin window when you leave (Esc, F11 or EXIT FULL).
+class DriftwerkEditor;
+class FullScreenWindow : public juce::Component
+{
+public:
+    explicit FullScreenWindow (DriftwerkEditor& e);
+    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
+    void resized() override;
+    bool keyPressed (const juce::KeyPress&) override;
+    void userTriedToCloseWindow() override;
+    DriftwerkEditor& editor;
+};
+
 class DriftwerkEditor : public juce::AudioProcessorEditor
 {
 public:
     explicit DriftwerkEditor (DriftwerkProcessor&);
+    ~DriftwerkEditor() override;
     void resized() override;
-    void paint (juce::Graphics& g) override { g.fillAll (juce::Colours::black); }
+    void paint (juce::Graphics& g) override;
+    void mouseDown (const juce::MouseEvent&) override;
     void refreshNow() { view.refreshNow(); }
     bool keyPressed (const juce::KeyPress& k) override;
-    void toggleFullScreen();
+    void toggleFullScreen();                       // switches on the next message loop turn
+    void setFull (bool on);                        // switches now
     bool isFull() const { return full; }
+    static void fitInto (juce::Component& c, juce::Rectangle<int> area);
+    static inline bool fullScreenOnDesktop = true;   // the offline test tool turns this off (no desktop there)
     MainView view;
 
 private:
     bool full = false;
-    juce::Rectangle<int> normalBounds;
+    std::unique_ptr<FullScreenWindow> fsWindow;    // after view: goes first
 };
