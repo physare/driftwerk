@@ -213,7 +213,7 @@ void SlimeLookAndFeel::drawButtonText (juce::Graphics& g, juce::TextButton& b, b
 {
     const bool lit = over || down || b.getToggleState();
     const bool accent = b.getProperties()["accent"];
-    g.setColour (lit ? juce::Colours::black : accent ? acid : fg);
+    g.setColour ((lit ? juce::Colours::black : accent ? acid : fg).withMultipliedAlpha (b.isEnabled() ? 1.0f : 0.3f));
     const bool smallText = b.getProperties()["small"];
     g.setFont (smallText ? dwui::font (10.5f).withExtraKerningFactor (0.03f) : dwui::font (12.0f).withExtraKerningFactor (0.08f));
     g.drawText (b.getButtonText(), b.getLocalBounds(), juce::Justification::centred);
@@ -851,8 +851,8 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
         { M_DRONE, "Drone", "six drifting voices", 1, 640, 160, 2,
           { { "drn.chord", "CHORD", 1 }, { "drn.oct", "OCTAVE", 0 }, { "drn.detune", "DETUNE", 0 }, { "drn.drift", "DRIFT", 0 }, { "drn.level", "LEVEL", 0 } } },
         { M_NOISE, "Noise", "sample + hold", 1, 800, 100, 1, { { "nz.slew", "SLEW", 0 } } },
-        { M_LFO1, "LFO 1", "slow", 1, 900, 100, 1, { { "lfo1.rate", "RATE", 0 }, { "lfo1.shape", "SHAPE", 1 } } },
-        { M_LFO2, "LFO 2", "slow", 1, 1000, 100, 1, { { "lfo2.rate", "RATE", 0 }, { "lfo2.shape", "SHAPE", 1 } } },
+        { M_LFO1, "LFO 1", "slow", 1, 900, 100, 1, { { "lfo1.rate", "RATE", 0 }, { "lfo1.shape", "SHAPE", 1 }, { "lfo1.sync", "SYNC", 1 } } },
+        { M_LFO2, "LFO 2", "slow", 1, 1000, 100, 1, { { "lfo2.rate", "RATE", 0 }, { "lfo2.shape", "SHAPE", 1 }, { "lfo2.sync", "SYNC", 1 } } },
         { M_DREAM, "Dream", "loops of unequal length", 1, 1100, 170, 2,
           { { "dream.chord", "CHORD", 1 }, { "dream.rate", "SPEED", 0 }, { "dream.tone", "TONE", 0 }, { "dream.warp", "WARP", 0 }, { "dream.level", "LEVEL", 0 } } },
         { M_CAMERA, "Hand", "webcam tracking", 1, 1270, 230, 1,
@@ -949,7 +949,7 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
         struct T { int out; bool bipolar; int every; juce::Rectangle<int> r; };
         const int t1 = rowTop (1), t2 = rowTop (2);
         const T defs[] { { O_SNH, true, 2, { 810, t1 + 138, 80, 74 } },
-                         { O_LFO1, true, 3, { 910, t1 + 178, 80, 62 } }, { O_LFO2, true, 3, { 1010, t1 + 178, 80, 62 } },
+                         { O_LFO1, true, 3, { 910, t1 + 231, 80, 22 } }, { O_LFO2, true, 3, { 1010, t1 + 231, 80, 22 } },
                          { O_ENV1, false, 1, { 10, t2 + 186, 110, 56 } }, { O_ENV2, false, 1, { 140, t2 + 186, 110, 56 } } };
         for (const auto& d : defs)
         {
@@ -1030,6 +1030,9 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     morphButton.setClickingTogglesState (false);
     morphButton.onClick = [this] { showMorph (! morph->isVisible()); };
     addAndMakeVisible (morphButton);
+    undoButton.setTooltip ("Take back the last knob, menu or switch you changed, or the last preset you loaded");
+    undoButton.onClick = [this] { if (proc.undo()) refreshPatch(); };
+    addAndMakeVisible (undoButton);
 
     fullCam = std::make_unique<FullCameraView> (proc, *slime);
     fullCam->onClose = [this] { openFullCamera (false); };
@@ -1283,6 +1286,7 @@ void MainView::resized()
     cables->setBounds (getLocalBounds());
     fullCam->setBounds (getLocalBounds());
     morphButton.setBounds (getWidth() - 1044, 14, 78, 26);
+    undoButton.setBounds (getWidth() - 1122, 14, 72, 26);
     morphBar = { morphButton.getX() + 6, 43, morphButton.getWidth() - 12, 5 };
     morph->setBounds (morphButton.getX() - 150, 56, 460, 214);
     recordButton.setBounds (getWidth() - 958, 14, 76, 26);
@@ -1617,6 +1621,7 @@ void MainView::timerCallback()
 
     for (auto& sl : sliders) syncModRing (*sl, proc);
     if (morph->isVisible()) morph->refresh();
+    if (const bool can = proc.canUndo(); can != undoButton.isEnabled()) undoButton.setEnabled (can);
     {
         // The little A-B line under MORPH, once both are stored.
         float mp = -1.0f;

@@ -117,6 +117,12 @@ Right-click any knob (or a LAYERS fader, or a knob on the performance tabs) to m
 
 The fader at the bottom of the menu sets how far it moves; below zero turns the knob the other way. A line shows the range the knob moves through and a bright dot shows where it is right now. Choose "Nothing" to go back to manual. Assignments are saved with your set and your presets.
 
+**SYNC** on LFO 1 and LFO 2 ties the sweep to the tempo: one sweep every 16, 8, 4, 2 or 1 bars, or every half or quarter note. FREE uses the RATE knob. Each LFO, the S&H and both envelopes draw what they are doing on their panel.
+
+## UNDO
+
+**UNDO** in the header takes back the last knob, menu or switch you changed. Press it again to go further back. Loading a preset is one step too: UNDO brings back the knobs, cables and modulation you had before.
+
 ## MORPH: from one sound to another
 
 **MORPH** in the header opens two snapshots of every knob, fader, menu and switch:

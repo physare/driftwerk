@@ -30,6 +30,8 @@ const int chords[6][6] {
 };
 
 const juce::StringArray lfoShapeNames { "SINE", "TRI", "S&H", "DRIFT" };
+const juce::StringArray lfoSyncNames { "FREE", "16 BARS", "8 BARS", "4 BARS", "2 BARS", "1 BAR", "1/2", "1/4" };
+const float lfoSyncBeats[] { 0.0f, 64.0f, 32.0f, 16.0f, 8.0f, 4.0f, 2.0f, 1.0f };
 
 // Drone TYPE: what each of the six drone voices is made of. COLOUR (drn.wave) shapes each type.
 const juce::StringArray droneTypeNames { "SAWS", "ORGAN", "STRINGS", "GLASS", "CHOIR" };
@@ -865,6 +867,9 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("mem.blur", "Memory Blur", NRange (0.0f, 1.0f), 0.35f);
     fl ("mem.scatter", "Memory Scatter", NRange (0.0f, 1.0f), 0.4f);
     fl ("mem.dissolve", "Memory Dissolve", NRange (0.0f, 0.9f), 0.35f);
+    // LFO SYNC: FREE uses RATE; otherwise one sweep takes this long at the tempo
+    ch ("lfo1.sync", "LFO 1 Sync", lfoSyncNames, 0);
+    ch ("lfo2.sync", "LFO 2 Sync", lfoSyncNames, 0);
     // MORPH: glide every knob between two snapshots, A and B
     fl ("morph.pos", "Morph A-B", NRange (0.0f, 1.0f), 0.0f);
     ch ("morph.move", "Morph Move", juce::StringArray { "HOLD", "A TO B", "B TO A", "BACK + FORTH", "WANDER" }, 0);
@@ -943,6 +948,8 @@ DriftwerkProcessor::DriftwerkProcessor()
                                                                                        : 0.3f + 0.4f * (float) (h % 1000u) / 999.0f;
     }
     morphTimer = std::make_unique<MorphTimer> (*this);
+    undoBefore.resize (paramList.size(), 0.0f);
+    for (auto* rp : paramList) rp->addListener (&undoWatcher);
     for (auto& c : chordNotes) c.store (0);
     for (auto& w : wanderHist) w.store (0);
     for (int i = 0; i < dw::TapeLoops::V; ++i) { loopPhase[(size_t) i].store (0.0f); loopEnv[(size_t) i].store (0.0f); loopNote[(size_t) i].store (60); loopRatio[(size_t) i].store (1.0f); }
@@ -1434,6 +1441,7 @@ DriftwerkProcessor::~DriftwerkProcessor()
     stopRecording();
     cameraPoller = nullptr;
     morphTimer = nullptr;
+    for (auto* rp : paramList) rp->removeListener (&undoWatcher);
     camera.close();
 }
 
@@ -1909,6 +1917,12 @@ void DriftwerkProcessor::updateBlockParams()
     p.droneDriftAmt = f ("drn.drift"); p.droneLevel = f ("drn.level");
     p.snhSlew = f ("nz.slew");
     p.lfo1Rate = f ("lfo1.rate"); p.lfo1Shape = i ("lfo1.shape"); p.lfo2Rate = f ("lfo2.rate"); p.lfo2Shape = i ("lfo2.shape");
+    {
+        // SYNC: one sweep every so many beats, at the tempo Timewind is running at.
+        const float beatsPerSec = (float) (sr / juce::jmax (1.0, samplesPerBeat));
+        if (const int s1 = juce::jlimit (0, 7, i ("lfo1.sync")); s1 > 0) p.lfo1Rate = beatsPerSec / lfoSyncBeats[s1];
+        if (const int s2 = juce::jlimit (0, 7, i ("lfo2.sync")); s2 > 0) p.lfo2Rate = beatsPerSec / lfoSyncBeats[s2];
+    }
     p.e1a = f ("env1.a"); p.e1d = f ("env1.d"); p.e1s = f ("env1.s"); p.e1r = f ("env1.r");
     p.e2a = f ("env2.a"); p.e2d = f ("env2.d"); p.e2s = f ("env2.s"); p.e2r = f ("env2.r");
     p.mix[0] = f ("mix.l1"); p.mix[1] = f ("mix.l2"); p.mix[2] = f ("mix.l3"); p.mix[3] = f ("mix.l4");
@@ -3314,6 +3328,16 @@ void DriftwerkProcessor::loadPreset (int index)
 {
     if (index < 0 || index >= getNumPresets()) return;
     ++stateLoads;   // the morph carries on from the new preset (your A and B stay stored)
+    {
+        // One UNDO step for the whole preset: the knobs (recorded as they change), cables and modulation.
+        const juce::ScopedLock ul (undoLock);
+        if (! undoing)
+        {
+            undoPresetGroup = ++undoGroup;
+            undoPresets.push_back ({ undoPresetGroup, getPatchString(), getModString(), userPresetName, currentProgram });
+            if (undoPresets.size() > 40) undoPresets.erase (undoPresets.begin());
+        }
+    }
     currentProgram = index;
     userPresetName.clear();
     const auto& pr = presets()[(size_t) index];
@@ -3361,6 +3385,7 @@ void DriftwerkProcessor::loadPreset (int index)
     setModFromString (pr.mods != nullptr ? pr.mods : "");
     if (juce::MessageManager::existsAndIsCurrentThread()) syncGrainSource();
     ++stateLoads;
+    { const juce::ScopedLock ul (undoLock); undoPresetGroup = 0; }
 }
 
 void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -3477,6 +3502,59 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
             ++stateLoads;
         }
     }
+}
+
+//==============================================================================
+// UNDO
+void DriftwerkProcessor::undoGesture (int index, bool starting)
+{
+    const auto& all = getParameters();
+    if (index < 0 || index >= all.size()) return;
+    auto* rp = dynamic_cast<juce::RangedAudioParameter*> (all[index]);
+    if (rp == nullptr || rp->getParameterID().startsWith ("morph.")) return;
+    const int k = paramIndex (rp->getParameterID());
+    if (k < 0) return;
+    const juce::ScopedLock sl (undoLock);
+    if (undoing) return;
+    if (starting) { undoBefore[(size_t) k] = rp->getValue(); return; }
+    if (std::abs (rp->getValue() - undoBefore[(size_t) k]) < 1.0e-6f) return;
+    undoSteps.push_back ({ undoPresetGroup != 0 ? undoPresetGroup : ++undoGroup, k, undoBefore[(size_t) k] });
+    if (undoSteps.size() > 4000) undoSteps.erase (undoSteps.begin(), undoSteps.begin() + 1000);
+}
+
+bool DriftwerkProcessor::canUndo() const
+{
+    const juce::ScopedLock sl (undoLock);
+    return ! undoSteps.empty() || ! undoPresets.empty();
+}
+
+bool DriftwerkProcessor::undo()
+{
+    std::vector<UndoStep> steps;
+    UndoPreset preset { 0, {}, {}, {}, 0 };
+    {
+        const juce::ScopedLock sl (undoLock);
+        int group = 0;
+        if (! undoSteps.empty()) group = undoSteps.back().group;
+        if (! undoPresets.empty()) group = juce::jmax (group, undoPresets.back().group);
+        if (group == 0) return false;
+        while (! undoSteps.empty() && undoSteps.back().group == group) { steps.push_back (undoSteps.back()); undoSteps.pop_back(); }
+        if (! undoPresets.empty() && undoPresets.back().group == group) { preset = undoPresets.back(); undoPresets.pop_back(); }
+        undoing = true;
+    }
+    ++stateLoads;
+    for (const auto& st : steps) paramList[(size_t) st.k]->setValueNotifyingHost (st.before);   // newest first, so the oldest value wins
+    if (preset.group != 0)
+    {
+        setPatchFromString (preset.patch);
+        setModFromString (preset.mods);
+        currentProgram = preset.program;
+        userPresetName = preset.user;
+    }
+    ++stateLoads;
+    { const juce::ScopedLock sl (undoLock); undoing = false; }
+    updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    return true;
 }
 
 //==============================================================================

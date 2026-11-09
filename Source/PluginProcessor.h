@@ -88,6 +88,10 @@ public:
 
     juce::AudioProcessorValueTreeState apvts;
 
+    // UNDO: every knob, menu or switch you change (and every preset you load) can be taken back.
+    bool undo();
+    bool canUndo() const;
+
     // MORPH: two snapshots of every knob, fader and switch (A and B) and a glide between them.
     // morph.pos says where you are (0 = A, 1 = B). The knobs really turn, on the message thread,
     // so you see them move; floats and whole numbers glide, menus and switches flip part way.
@@ -470,6 +474,24 @@ private:
         void timerCallback() override;
     };
     std::unique_ptr<CameraPoller> cameraPoller;
+    // UNDO (message thread, under undoLock)
+    struct UndoStep { int group; int k; float before; };
+    struct UndoPreset { int group; juce::String patch, mods, user; int program; };
+    struct UndoWatcher : juce::AudioProcessorParameter::Listener
+    {
+        DriftwerkProcessor& owner;
+        explicit UndoWatcher (DriftwerkProcessor& o) : owner (o) {}
+        void parameterValueChanged (int, float) override {}
+        void parameterGestureChanged (int index, bool starting) override { owner.undoGesture (index, starting); }
+    };
+    UndoWatcher undoWatcher { *this };
+    void undoGesture (int index, bool starting);
+    juce::CriticalSection undoLock;
+    std::vector<UndoStep> undoSteps;
+    std::vector<UndoPreset> undoPresets;
+    std::vector<float> undoBefore;
+    int undoGroup = 0, undoPresetGroup = 0;    // undoPresetGroup: a preset is loading, its changes are one step
+    bool undoing = false;
     // MORPH (the snapshots under morphLock; the rest belongs to morphTick, on the message thread)
     juce::CriticalSection morphLock;
     std::vector<float> morphSnap[2];                   // normalised values, same order as paramList (empty: not stored)

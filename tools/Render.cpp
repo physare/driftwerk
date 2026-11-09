@@ -143,6 +143,18 @@ int main (int argc, char** argv)
                          proc.userPresetName.toRawUTF8(), (int) proc.apvts.getRawParameterValue ("pulse.kit")->load());
             DriftwerkProcessor::userPresetFolder().getChildFile ("Render Test.timewind").deleteFile();
         }
+        if (a.contains ("undo"))   // UNDO: a knob, then a preset, taken back in turn
+        {
+            auto* cut = proc.apvts.getParameter ("vcf1.cut");
+            const float v0 = cut->getValue(); const int prog0 = proc.getCurrentPreset(); const auto patch0 = proc.getPatchString();
+            cut->beginChangeGesture(); cut->setValueNotifyingHost (0.9f); cut->endChangeGesture();
+            proc.loadPreset (34);
+            const bool u1 = proc.undo();
+            const bool backPreset = proc.getCurrentPreset() == prog0 && proc.getPatchString() == patch0 && std::abs (cut->getValue() - 0.9f) < 1.0e-4f;
+            const bool u2 = proc.undo();
+            std::printf ("undo: %d %d  preset back %d  knob back %d  more %d\n", (int) u1, (int) u2, (int) backPreset,
+                         (int) (std::abs (cut->getValue() - v0) < 1.0e-4f), (int) proc.canUndo());
+        }
         if (a.contains ("morph"))   // MORPH: A and B come back with a set, and with a preset of yours only while moving
         {
             juce::MemoryBlock mb;

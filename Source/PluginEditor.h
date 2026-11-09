@@ -426,6 +426,7 @@ private:
     std::unique_ptr<MorphPanel> morph;
     std::vector<std::unique_ptr<MiniTrace>> traces;
     juce::TextButton morphButton { "MORPH" };
+    juce::TextButton undoButton { "UNDO" };
     juce::Rectangle<int> morphBar;                         // under MORPH: where the A-B fader is now
     float shownMorphPos = -1.0f;
     friend class PerformPanel;
