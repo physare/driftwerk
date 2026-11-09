@@ -42,16 +42,27 @@ const double hitRateBeats[] { 0.25, 0.5, 1.0, 2.0, 4.0 };
 // A gentle default pattern: at DENSITY 0.5 over 8 steps it plays 3 + 3 + 2.
 const float defaultHitWeights[16] { 0.0f, 0.9f, 0.7f, 0.15f, 0.55f, 0.85f, 0.3f, 0.95f, 0.4f, 0.8f, 0.65f, 0.2f, 0.6f, 0.9f, 0.35f, 0.75f };
 const juce::StringArray loopNoteNames { "CHORD", "SCALE", "ROOTS" };
-const juce::StringArray slimeVoiceNames { "DROPS", "BREATH", "TINES", "MIXED" };
-const juce::StringArray pulseStyleNames { "HEARTBEAT", "DRIFT", "LAZY", "RAIN", "MOTORIK", "ORGANISM" };
-constexpr int pulseOrganismStyle = 5;
+const juce::StringArray slimeVoiceNames { "DROPS", "BREATH", "TINES", "MIXED", "GLASS", "PLUCK", "MARIMBA", "VOICE", "BOWED",
+                                          "BUBBLES", "CHIRPS", "GRAIN SOUND", "RANDOM" };
+constexpr int slimeMixed = 3, slimeRandom = 12;
+const juce::StringArray pulseStyleNames { "HEARTBEAT", "DRIFT", "LAZY", "RAIN", "MOTORIK", "ORGANISM",
+                                          "SHUFFLE", "DUB", "TRIBAL", "BOSSA", "BROKEN", "BREAK", "JUNGLE", "DRILL" };
+constexpr int pulseOrganismStyle = 5, pulseDrillStyle = 13, pulseNumStyles = 14;
+const juce::StringArray pulseKitNames { "SOFT", "DEEP", "DUSTY", "GLASS", "HANDS", "GLITCH", "IDM" };
+// LENGTH: every lane the same, or lanes of different lengths that drift against each other.
+const juce::StringArray pulseLengthNames { "16", "12", "8", "6", "POLY", "WILD" };
+const int pulseLengths[6][5] { { 16, 16, 16, 16, 16 }, { 12, 12, 12, 12, 12 }, { 8, 8, 8, 8, 8 }, { 6, 6, 6, 6, 6 },
+                               { 16, 16, 12, 14, 10 }, { 16, 15, 13, 11, 7 } };
 const juce::StringArray pulseSpeedNames { "1/16", "1/8", "1/4" };
 const juce::StringArray texNames { "RAIN", "WIND", "STREAM", "CRACKLE", "CREATURES", "FIRE", "SHORE" };
 const juce::StringArray texNamesB { "OFF", "RAIN", "WIND", "STREAM", "CRACKLE", "CREATURES", "FIRE", "SHORE" };
+const juce::StringArray arpWaveNames { "PATCH", "SINE", "TRIANGLE", "SAW", "SQUARE", "WAVETABLE" };
+const juce::StringArray wordsSourceNames { "MY RECORDINGS", "SYNTH VOICE" };
 const juce::StringArray memSpeedNames { "1x", "1/2", "1/4", "REVERSE", "REV 1/2", "WANDER" };
 constexpr long long pulseNoStep = std::numeric_limits<long long>::min();
-// PULSE styles: how likely each lane (THUMP, SKIN, WOOD, BRUSH, TICK) is to play on each step.
-const float pulseStyleW[5][5][16] {
+// PULSE styles: how likely each lane (low, snare, wood, hat, tick) is to play on each step.
+// ORGANISM (5) has no pattern: the slime plays the drums.
+const float pulseStyleW[pulseNumStyles][5][16] {
     {   // HEARTBEAT: lub-dub, a brush now and then
         { 1, 0, .85f, 0, 0, 0, 0, 0, .5f, 0, .42f, 0, 0, 0, 0, 0 },
         { 0, 0, 0, 0, 0, 0, .2f, 0, 0, 0, 0, 0, .35f, 0, 0, .15f },
@@ -81,7 +92,57 @@ const float pulseStyleW[5][5][16] {
         { 0, 0, 0, 0, .3f, 0, 0, 0, 0, 0, 0, 0, .35f, 0, 0, 0 },
         { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, .35f, 0 },
         { .3f, 0, .9f, 0, .3f, 0, .9f, 0, .3f, 0, .9f, 0, .3f, 0, .9f, .2f },
-        { .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f } } };
+        { .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f, .3f } },
+    {   // ORGANISM: no pattern
+        {}, {}, {}, {}, {} },
+    {   // SHUFFLE: a backbeat with a lilt (turn SWING up)
+        { 1, 0, 0, 0, 0, 0, 0, .3f, 0, 0, .85f, 0, 0, 0, 0, .2f },
+        { 0, 0, 0, 0, .95f, 0, 0, .15f, 0, 0, 0, 0, .95f, 0, 0, .2f },
+        { 0, 0, 0, 0, 0, 0, .25f, 0, 0, 0, 0, 0, 0, 0, 0, .3f },
+        { .9f, 0, .6f, .35f, .9f, 0, .6f, .35f, .9f, 0, .6f, .35f, .9f, 0, .6f, .4f },
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, .12f, 0 } },
+    {   // DUB: one drop on the third beat, rims around it, hats on the offbeat
+        { .15f, 0, 0, 0, 0, 0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0 },
+        { 0, 0, 0, 0, 0, 0, 0, 0, .9f, 0, 0, 0, 0, 0, 0, .12f },
+        { 0, 0, 0, .4f, 0, 0, .45f, 0, 0, 0, 0, .4f, 0, 0, .5f, 0 },
+        { 0, 0, .85f, 0, 0, 0, .85f, 0, 0, 0, .85f, 0, 0, 0, .85f, .3f },
+        { .15f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, .1f, 0, 0, 0 } },
+    {   // TRIBAL: hand drums, three against four
+        { 1, 0, 0, .35f, 0, 0, .7f, 0, 0, .4f, 0, 0, .75f, 0, 0, 0 },
+        { 0, 0, .6f, 0, .5f, 0, 0, .55f, 0, 0, .6f, 0, 0, .45f, 0, .5f },
+        { .7f, 0, 0, .7f, 0, 0, .7f, 0, 0, .7f, 0, 0, .7f, 0, 0, .6f },
+        { .7f, .35f, .5f, .35f, .7f, .35f, .5f, .35f, .7f, .35f, .5f, .35f, .7f, .35f, .5f, .4f },
+        { 0, 0, 0, 0, .55f, 0, 0, 0, 0, 0, 0, 0, .55f, 0, 0, .2f } },
+    {   // BOSSA: a rocking low drum and a clave on the rim
+        { .95f, 0, 0, .55f, .8f, 0, 0, .55f, .95f, 0, 0, .55f, .8f, 0, 0, .55f },
+        { 0, 0, 0, 0, 0, 0, .15f, 0, 0, 0, 0, 0, 0, 0, .15f, 0 },
+        { .85f, 0, 0, .8f, 0, 0, .8f, 0, 0, 0, .8f, 0, .8f, 0, 0, 0 },
+        { .7f, .4f, .7f, .4f, .7f, .4f, .7f, .4f, .7f, .4f, .7f, .4f, .7f, .4f, .7f, .4f },
+        { 0, 0, 0, 0, 0, 0, 0, 0, 0, .1f, 0, 0, 0, 0, 0, 0 } },
+    {   // BROKEN: a broken beat that never quite sits square
+        { 1, 0, 0, 0, 0, 0, .65f, 0, 0, 0, .8f, 0, 0, .4f, 0, 0 },
+        { 0, 0, 0, 0, .95f, 0, 0, .3f, 0, .2f, 0, 0, .9f, 0, 0, 0 },
+        { 0, 0, .25f, 0, 0, 0, 0, 0, 0, 0, 0, .3f, 0, 0, .35f, 0 },
+        { .8f, 0, .55f, .4f, 0, .5f, .7f, 0, .75f, .3f, 0, .6f, .5f, 0, .65f, .4f },
+        { 0, .2f, 0, 0, 0, 0, 0, .25f, 0, 0, 0, 0, 0, .2f, 0, 0 } },
+    {   // BREAK: a funky breakbeat with ghost snares
+        { 1, 0, .55f, 0, 0, 0, 0, 0, 0, 0, .9f, .6f, 0, 0, 0, 0 },
+        { 0, 0, 0, 0, .95f, 0, 0, .35f, 0, .35f, 0, 0, .95f, 0, .3f, .4f },
+        { 0, 0, 0, 0, 0, 0, .15f, 0, 0, 0, 0, 0, 0, 0, 0, 0 },
+        { .9f, .2f, .85f, .2f, .9f, .2f, .85f, .2f, .9f, .2f, .85f, .2f, .9f, .2f, .85f, .3f },
+        { .15f, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 } },
+    {   // JUNGLE: a fast break, snares tumbling (try STEP 1/16 and some CHOP)
+        { 1, 0, 0, 0, 0, 0, 0, 0, 0, 0, .9f, 0, 0, 0, 0, .25f },
+        { 0, 0, 0, 0, .95f, 0, 0, .55f, 0, .5f, 0, 0, .95f, 0, .45f, .5f },
+        { 0, 0, 0, .2f, 0, 0, 0, 0, 0, 0, 0, 0, 0, .2f, 0, 0 },
+        { .8f, .55f, .8f, .55f, .8f, .55f, .8f, .55f, .8f, .55f, .8f, .55f, .8f, .55f, .8f, .6f },
+        { 0, 0, 0, 0, 0, 0, 0, .12f, 0, 0, 0, 0, 0, 0, 0, .12f } },
+    {   // DRILL: skittering and restless, rolls everywhere (try the IDM kit)
+        { .9f, 0, 0, .4f, 0, 0, .5f, 0, 0, .45f, 0, .3f, 0, 0, .5f, 0 },
+        { 0, .25f, 0, 0, .85f, 0, .35f, .3f, 0, .4f, 0, .35f, .85f, .3f, .45f, .55f },
+        { .3f, 0, .35f, 0, .25f, .3f, 0, .35f, .3f, 0, .3f, 0, .25f, 0, .4f, .3f },
+        { .7f, .5f, .6f, .5f, .7f, .55f, .6f, .5f, .7f, .5f, .6f, .55f, .7f, .5f, .6f, .5f },
+        { .3f, .25f, 0, .3f, 0, .25f, .3f, 0, .3f, 0, .25f, .3f, 0, .3f, 0, .25f } } };
 const char* const slotDegIds[] { "prog.d1", "prog.d2", "prog.d3", "prog.d4", "prog.d5", "prog.d6", "prog.d7", "prog.d8" };
 const char* const slotTypeIds[] { "prog.t1", "prog.t2", "prog.t3", "prog.t4", "prog.t5", "prog.t6", "prog.t7", "prog.t8" };
 const char* const slotLenIds[] { "prog.b1", "prog.b2", "prog.b3", "prog.b4", "prog.b5", "prog.b6", "prog.b7", "prog.b8" };
@@ -119,7 +180,7 @@ const std::vector<Preset>& presets()
             { "drn.chord", 2 }, { "drn.oct", -2 }, { "drn.detune", 0.25f }, { "drn.level", 0.8f },
             { "vcf2.cut", 520 }, { "vcf2.res", 0.88f }, { "vcf2.cv1", 0.55f }, { "vcf2.cv2", 0.35f }, { "out.lvl2", 0.55f },
             { "lfo1.rate", 0.018f }, { "lfo2.rate", 0.045f }, { "lfo2.shape", 3 },
-            { "dream.chord", 2 }, { "dream.rate", 0.45f }, { "dream.tone", 0.2f }, { "dream.warp", 0.15f }, { "dream.level", 0.8f },
+            { "dream.chord", 2 }, { "dream.rate", 0.45f }, { "dream.tone", 0.2f }, { "dream.warp", 0.15f }, { "dream.level", 0.8f }, { "dream.sound", 9 },
             { "grain.level", 0.3f }, { "grain.size", 1.1f }, { "grain.density", 3 }, { "grain.pitch", 12 }, { "grain.spray", 0.6f },
             { "hall.size", 0.97f }, { "hall.mix", 0.62f }, { "hall.shimmer", 0.55f }, { "out.ens", 0.7f },
             { "tape.wow", 0.12f }, { "tape.hiss", 0.08f }, { "echo.mix", 0.15f } } },
@@ -128,7 +189,7 @@ const std::vector<Preset>& presets()
             { "drn.chord", 1 }, { "drn.oct", -2 }, { "drn.detune", 0.6f }, { "vca2.gain", 0.25f }, { "vca2.cv", 0.75f },
             { "lfo1.rate", 0.08f }, { "lfo1.shape", 0 }, { "lfo2.rate", 0.01f }, { "lfo2.shape", 3 },
             { "vcf2.cut", 320 }, { "vcf2.res", 0.4f }, { "vcf2.cv1", 0.4f },
-            { "dream.chord", 1 }, { "dream.rate", 0.3f }, { "dream.level", 0.5f }, { "dream.tone", 0.15f },
+            { "dream.chord", 1 }, { "dream.rate", 0.3f }, { "dream.level", 0.5f }, { "dream.sound", 11 }, { "dream.tone", 0.15f },
             { "tape.hiss", 0.32f }, { "tape.wow", 0.2f }, { "tape.age", 0.35f },
             { "grain.level", 0.15f }, { "grain.pitch", -12 }, { "grain.size", 0.9f }, { "hall.mix", 0.55f }, { "hall.size", 0.92f } } },
         { "Soundbath", "Cathedral Ghosts", DRONE_OUT "lfo1.out>vcf2.cv1",
@@ -136,7 +197,7 @@ const std::vector<Preset>& presets()
             { "drn.chord", 2 }, { "drn.level", 0.4f },
             { "grain.reverse", 0.9f }, { "grain.pitch", -12 }, { "grain.size", 1.2f }, { "grain.density", 6 },
             { "grain.spray", 0.8f }, { "grain.level", 0.6f }, { "grain.scan", 0.02f },
-            { "dream.chord", 3 }, { "dream.level", 0.6f }, { "dream.rate", 0.5f },
+            { "dream.chord", 3 }, { "dream.level", 0.6f }, { "dream.sound", 2 }, { "dream.rate", 0.5f },
             { "hall.size", 0.99f }, { "hall.mix", 0.7f }, { "hall.shimmer", 0.7f },
             { "echo.div", 5 }, { "echo.fb", 0.72f }, { "echo.mix", 0.3f } } },
         { "Soundbath", "Airport Tapes", "drn.out>vcf2.in;lfo1.out>vcf2.cv1;vcf2.out>out.in2;clk.div4>nz.clk;nz.snh>vcf2.cv2",
@@ -168,7 +229,7 @@ const std::vector<Preset>& presets()
             { "arp.density", 0.7f }, { "arp.mutate", 0.15f }, { "arp.walk", 0.7f }, { "arp.gate", 0.15f },
             { "env1.a", 0.001f }, { "env1.d", 0.12f }, { "env1.r", 0.15f },
             { "vcf1.cut", 900 }, { "vcf1.res", 0.75f }, { "vcf1.cv1", 0.75f }, { "vcf1.cv2", 0.0f }, { "vco2.oct", 1 },
-            { "dream.chord", 4 }, { "dream.level", 0.35f }, { "drn.chord", 2 }, { "drn.level", 0.3f },
+            { "dream.chord", 4 }, { "dream.level", 0.35f }, { "dream.sound", 9 }, { "drn.chord", 2 }, { "drn.level", 0.3f },
             { "echo.div", 2 }, { "echo.fb", 0.6f }, { "echo.mix", 0.45f }, { "hall.mix", 0.45f }, { "hall.shimmer", 0.35f } } },
         { "Plucks + sequences", "Kalimba Rain",
           SEQ_CORE "vco1.saw>mix.in1;vco2.sub>vco1.fm;arp.gate>grain.trig;" DRONE_OUT,
@@ -177,7 +238,7 @@ const std::vector<Preset>& presets()
             { "vco1.fm", 0.35f }, { "vco2.oct", 1 }, { "env1.d", 0.18f }, { "env1.r", 0.25f },
             { "vcf1.cut", 1400 }, { "vcf1.res", 0.35f }, { "vcf1.cv2", 0.0f },
             { "grain.src", 4 }, { "grain.level", 0.3f }, { "grain.pitch", 12 }, { "grain.size", 0.05f }, { "grain.density", 1 }, { "grain.spray", 0.9f },
-            { "dream.chord", 1 }, { "dream.level", 0.3f }, { "drn.level", 0.3f }, { "drn.chord", 1 },
+            { "dream.chord", 1 }, { "dream.level", 0.3f }, { "dream.sound", 7 }, { "drn.level", 0.3f }, { "drn.chord", 1 },
             { "echo.div", 1 }, { "echo.fb", 0.5f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f } } },
         { "Plucks + sequences", "Toy Piano Ghost",
           SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;" DRONE_OUT,
@@ -186,7 +247,7 @@ const std::vector<Preset>& presets()
             { "env1.d", 0.25f }, { "vcf1.cut", 2200 }, { "vcf1.res", 0.2f }, { "vcf1.cv2", 0.0f },
             { "tape.wow", 0.6f }, { "tape.age", 0.6f }, { "tape.crush", 0.2f }, { "tape.hiss", 0.3f },
             { "grain.src", 2 }, { "grain.level", 0.3f }, { "grain.size", 0.5f },
-            { "dream.chord", 0 }, { "dream.warp", 0.7f }, { "dream.level", 0.45f }, { "drn.level", 0.25f }, { "drn.chord", 2 },
+            { "dream.chord", 0 }, { "dream.warp", 0.7f }, { "dream.level", 0.45f }, { "dream.sound", 6 }, { "drn.level", 0.25f }, { "drn.chord", 2 },
             { "echo.div", 3 }, { "echo.mix", 0.3f }, { "hall.mix", 0.5f } } },
         { "Plucks + sequences", "Black Tide",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.sub>mix.in1;vco2.pls>mix.in2;"
@@ -194,7 +255,7 @@ const std::vector<Preset>& presets()
           "vcf1.out>vca1.in;vca1.out>out.in1;drn.out>vcf2.in;lfo1.out>vcf2.cv1;env2.out>vcf2.cv2;"
           "clk.div4>env2.gate;vcf2.out>out.in2",
           { { "clk.div", 1 }, { "arp.root", 31 }, { "arp.scale", 2 }, { "arp.follow", 0 }, { "arp.density", 0.6f }, { "dream.chord", 5 },
-            { "drn.chord", 5 }, { "drn.oct", -2 }, { "drn.detune", 0.7f }, { "hall.size", 0.95f }, { "dream.level", 0.2f },
+            { "drn.chord", 5 }, { "drn.oct", -2 }, { "drn.detune", 0.7f }, { "hall.size", 0.95f }, { "dream.level", 0.2f }, { "dream.sound", 3 },
             { "hall.mix", 0.6f }, { "env2.a", 3 }, { "env2.r", 10 }, { "vcf2.cv2", 0.35f }, { "lfo1.shape", 3 } } },
         { "Plucks + sequences", "Pulse Engine",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.pls>mix.in1;vco2.saw>mix.in2;"
@@ -217,7 +278,7 @@ const std::vector<Preset>& presets()
             { "vcf1.cut", 2000 }, { "vcf1.res", 0.9f }, { "vcf1.cv2", 0.4f }, { "lfo2.rate", 6.0f }, { "lfo2.shape", 2 },
             { "vco2.fm", 0.6f }, { "vco2.oct", 2 },
             { "grain.level", 0.3f }, { "grain.size", 0.02f }, { "grain.density", 60 }, { "grain.spray", 1.0f }, { "grain.pitch", 19 },
-            { "dream.chord", 3 }, { "dream.level", 0.2f }, { "drn.level", 0.3f }, { "drn.chord", 4 },
+            { "dream.chord", 3 }, { "dream.level", 0.2f }, { "dream.sound", 2 }, { "drn.level", 0.3f }, { "drn.chord", 4 },
             { "hall.mix", 0.5f }, { "echo.div", 4 }, { "echo.mix", 0.3f } } },
         { "Weird", "Broken Radio Prayer",
           SEQ_CORE "vco1.saw>mix.in1;nz.noise>mix.in3;nz.snh>vcf1.cv2;clk.div4>nz.clk;" DRONE_OUT,
@@ -225,7 +286,7 @@ const std::vector<Preset>& presets()
             { "mix.l3", 0.25f }, { "vcf1.res", 0.85f }, { "vcf1.cv2", 0.6f }, { "nz.slew", 0.6f },
             { "tape.crush", 0.6f }, { "tape.age", 0.9f }, { "tape.hiss", 0.6f }, { "tape.wow", 0.7f },
             { "grain.scan", -0.4f }, { "grain.pitch", -7 }, { "grain.level", 0.5f }, { "grain.reverse", 0.5f },
-            { "dream.warp", 1.0f }, { "dream.level", 0.5f }, { "dream.chord", 2 },
+            { "dream.warp", 1.0f }, { "dream.level", 0.5f }, { "dream.sound", 10 }, { "dream.chord", 2 },
             { "echo.div", 6 }, { "echo.ms", 333 }, { "echo.fb", 0.85f }, { "echo.wow", 0.8f }, { "echo.mix", 0.4f } } },
         { "Weird", "Gravity Well",
           "clk.out>arp.clk;arp.pitch>vco1.pitch;arp.pitch>vco2.pitch;vco1.saw>mix.in1;vco2.saw>vco1.fm;mix.out>vcf1.in;"
@@ -255,14 +316,14 @@ const std::vector<Preset>& presets()
             { "chd.attack", 3.0f }, { "chd.release", 6.0f }, { "chd.width", 0.8f },
             { "prog.mode", 1 }, { "prog.bars", 3 }, { "prog.glide", 0.55f }, { "arp.on", 0 }, { "out.lvl1", 0 },
             { "grain.src", 3 }, { "grain.level", 0.3f }, { "grain.size", 0.9f }, { "grain.density", 4 }, { "grain.spray", 0.6f },
-            { "dream.level", 0.25f }, { "hall.size", 0.95f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.35f }, { "out.ens", 0.6f } } },
+            { "dream.level", 0.25f }, { "dream.sound", 2 }, { "hall.size", 0.95f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.35f }, { "out.ens", 0.6f } } },
         { "Chords + textures", "Organ Sunday", DRONE_OUT,
           { { "drn.type", 1 }, { "drn.wave", 0.6f }, { "drn.oct", -2 }, { "drn.chord", 2 }, { "drn.level", 0.55f }, { "drn.breath", 0.2f },
             { "vcf2.cut", 4000 }, { "vcf2.res", 0.05f },
             { "chd.on", 1 }, { "chd.mode", 1 }, { "chd.level", 0.4f }, { "chd.voices", 5 }, { "chd.wave", 0.25f }, { "chd.tone", 0.5f },
             { "chd.attack", 1.6f }, { "chd.release", 4.0f },
             { "prog.mode", 2 }, { "prog.bars", 2 }, { "prog.glide", 0.3f }, { "arp.on", 0 }, { "out.lvl1", 0 },
-            { "arp.scale", 6 }, { "arp.root", 41 }, { "dream.chord", 0 }, { "dream.level", 0.2f },
+            { "arp.scale", 6 }, { "arp.root", 41 }, { "dream.chord", 0 }, { "dream.level", 0.2f }, { "dream.sound", 5 },
             { "grain.src", 5 }, { "grain.level", 0.25f }, { "grain.pitch", 12 }, { "grain.size", 0.7f }, { "grain.density", 5 },
             { "hall.size", 0.9f }, { "hall.mix", 0.55f }, { "tape.wow", 0.1f } } },
         { "Chords + textures", "Glass Weather",
@@ -273,10 +334,10 @@ const std::vector<Preset>& presets()
             { "prog.mode", 3 }, { "prog.bars", 1 }, { "arp.follow", 1 }, { "arp.range", 3 }, { "arp.density", 0.55f }, { "arp.gate", 0.15f },
             { "clk.div", 3 }, { "vco1.oct", 1 }, { "env1.d", 0.15f }, { "vcf1.cut", 1200 }, { "vcf1.cv2", 0.0f }, { "out.lvl1", 0.45f },
             { "grain.src", 4 }, { "grain.level", 0.3f }, { "grain.pitch", 12 }, { "grain.size", 0.25f }, { "grain.density", 6 }, { "grain.spray", 0.8f },
-            { "dream.level", 0.2f }, { "echo.div", 2 }, { "echo.fb", 0.55f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f }, { "hall.shimmer", 0.45f } } },
+            { "dream.level", 0.2f }, { "dream.sound", 8 }, { "echo.div", 2 }, { "echo.fb", 0.55f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f }, { "hall.shimmer", 0.45f } } },
         { "Chords + textures", "String Machine Dawn",
           SEQ_CORE "vco1.saw>mix.in1;vco2.sub>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
-          { { "drn.type", 2 }, { "drn.wave", 0.75f }, { "drn.oct", -1 }, { "drn.chord", 1 }, { "drn.level", 0.45f }, { "vcf2.cut", 2200 },
+          { { "dream.sound", 3 }, { "drn.type", 2 }, { "drn.wave", 0.75f }, { "drn.oct", -1 }, { "drn.chord", 1 }, { "drn.level", 0.45f }, { "vcf2.cut", 2200 },
             { "chd.on", 1 }, { "chd.mode", 2 }, { "chd.level", 0.3f }, { "chd.voices", 4 }, { "chd.wave", 0.85f }, { "chd.tone", 0.35f },
             { "chd.attack", 0.02f }, { "chd.release", 0.45f },
             { "prog.mode", 1 }, { "prog.bars", 2 }, { "arp.follow", 0 }, { "arp.len", 8 }, { "arp.mutate", 0.05f }, { "arp.density", 0.9f },
@@ -311,7 +372,7 @@ const std::vector<Preset>& presets()
             { "chd.level", 0.4f }, { "chd.voices", 4 }, { "chd.wave", 0.2f }, { "chd.tone", 0.5f }, { "chd.attack", 0.06f }, { "chd.release", 1.2f },
             { "arp.follow", 1 }, { "arp.density", 0.5f }, { "arp.range", 3 }, { "arp.gate", 0.2f }, { "clk.div", 3 }, { "vco1.oct", 1 },
             { "env1.d", 0.2f }, { "vcf1.cut", 1100 }, { "vcf1.cv2", 0.0f }, { "out.lvl1", 0.3f }, { "lfo1.rate", 0.02f },
-            { "dream.level", 0.25f }, { "grain.src", 3 }, { "grain.level", 0.25f }, { "grain.size", 0.8f }, { "grain.density", 4 },
+            { "dream.level", 0.25f }, { "dream.sound", 1 }, { "grain.src", 3 }, { "grain.level", 0.25f }, { "grain.size", 0.8f }, { "grain.density", 4 },
             { "echo.div", 2 }, { "echo.fb", 0.5f }, { "echo.mix", 0.3f }, { "hall.size", 0.9f }, { "hall.mix", 0.55f }, { "hall.shimmer", 0.35f } } },
         { "Chords + textures", "Postcard Loop",
           SEQ_CORE "vco1.saw>mix.in1;vco2.pls>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
@@ -333,7 +394,7 @@ const std::vector<Preset>& presets()
             { "loop.on", 1 }, { "loop.voices", 6 }, { "loop.length", 16.0f }, { "loop.colour", 0.35f }, { "loop.swell", 0.45f }, { "loop.decay", 7.0f },
             { "loop.drift", 0.35f }, { "loop.weird", 0.2f }, { "loop.level", 0.6f },
             { "tex.on", 1 }, { "tex.a", 6 }, { "tex.level", 0.22f }, { "tex.space", 0.5f },
-            { "dream.level", 0.12f }, { "lfo1.rate", 0.02f }, { "hall.size", 0.95f }, { "hall.mix", 0.62f }, { "hall.shimmer", 0.4f } } },
+            { "dream.level", 0.12f }, { "dream.sound", 8 }, { "lfo1.rate", 0.02f }, { "hall.size", 0.95f }, { "hall.mix", 0.62f }, { "hall.shimmer", 0.4f } } },
         { "Weird + calm", "Reverse Garden", DRONE_OUT,
           { { "prog.mode", 10 }, { "prog.rhythm", 1 }, { "prog.bars", 2 }, { "prog.glide", 0.5f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 1 }, { "arp.root", 40 },
             { "drn.type", 2 }, { "drn.oct", -2 }, { "drn.level", 0.3f }, { "vcf2.cut", 900 },
@@ -343,7 +404,7 @@ const std::vector<Preset>& presets()
             { "mem.on", 1 }, { "mem.speed", 4 }, { "mem.ago", 20.0f }, { "mem.length", 6.0f }, { "mem.dissolve", 0.5f }, { "mem.level", 0.45f },
             { "dream.level", 0.15f }, { "hall.size", 0.93f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.3f } } },
         { "Weird + calm", "Slime Choir", DRONE_OUT "lfo1.out>vcf2.cv1",
-          { { "prog.mode", 3 }, { "prog.bars", 3 }, { "prog.glide", 0.6f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 0 }, { "arp.root", 36 },
+          { { "dream.sound", 10 }, { "prog.mode", 3 }, { "prog.bars", 3 }, { "prog.glide", 0.6f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 0 }, { "arp.root", 36 },
             { "drn.type", 4 }, { "drn.wave", 0.3f }, { "drn.breath", 0.5f }, { "drn.oct", -1 }, { "drn.level", 0.4f }, { "vcf2.cut", 1600 }, { "vcf2.cv1", 0.25f },
             { "slime.play", 1 }, { "slime.voice", 1 }, { "slime.activity", 0.5f }, { "slime.oct", 0 }, { "slime.weird", 0.35f }, { "slime.level", 0.55f },
             { "grain.src", 12 }, { "grain.level", 0.3f }, { "grain.pitch", -12 }, { "grain.size", 0.9f }, { "grain.density", 5 },
@@ -352,7 +413,7 @@ const std::vector<Preset>& presets()
         { "Weird + calm", "Heartbeat Moss", DRONE_OUT,
           { { "prog.mode", 1 }, { "prog.bars", 2 }, { "prog.glide", 0.3f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 6 }, { "arp.root", 41 }, { "clk.bpm", 72 },
             { "drn.type", 1 }, { "drn.wave", 0.3f }, { "drn.oct", -2 }, { "drn.level", 0.3f }, { "vcf2.cut", 1100 },
-            { "pulse.on", 1 }, { "pulse.style", 0 }, { "pulse.speed", 1 }, { "pulse.level", 0.45f }, { "pulse.space", 0.6f }, { "pulse.vary", 0.25f },
+            { "pulse.on", 1 }, { "pulse.style", 0 }, { "pulse.speed", 1 }, { "pulse.level", 0.32f }, { "pulse.space", 0.6f }, { "pulse.vary", 0.25f },
             { "loop.on", 1 }, { "loop.voices", 4 }, { "loop.length", 10.0f }, { "loop.level", 0.4f },
             { "tex.on", 1 }, { "tex.a", 0 }, { "tex.b", 4 }, { "tex.blend", 0.3f }, { "tex.level", 0.3f }, { "tex.density", 0.35f },
             { "chd.on", 1 }, { "chd.mode", 0 }, { "chd.level", 0.25f }, { "chd.voices", 4 }, { "chd.tone", 0.35f }, { "chd.attack", 3.0f }, { "chd.release", 6.0f },
@@ -361,7 +422,7 @@ const std::vector<Preset>& presets()
           SEQ_CORE "vco1.saw>mix.in1;vco2.pls>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
           { { "prog.mode", 5 }, { "prog.bars", 1 }, { "prog.glide", 0.2f }, { "prog.colour", 3 }, { "arp.scale", 6 }, { "arp.root", 38 }, { "clk.bpm", 84 },
             { "pulse.on", 1 }, { "pulse.style", 2 }, { "pulse.speed", 0 }, { "pulse.swing", 0.35f }, { "pulse.human", 0.45f }, { "pulse.tone", 0.35f },
-            { "pulse.level", 0.5f }, { "pulse.space", 0.35f }, { "pulse.vary", 0.3f },
+            { "pulse.level", 0.35f }, { "pulse.space", 0.35f }, { "pulse.vary", 0.3f },
             { "chd.on", 1 }, { "chd.mode", 5 }, { "chd.steps", 16 }, { "chd.rate", 0 }, { "chd.density", 0.3f }, { "chd.gate", 0.6f }, { "chd.level", 0.3f },
             { "chd.voices", 4 }, { "chd.wave", 0.6f }, { "chd.tone", 0.4f }, { "chd.attack", 0.01f }, { "chd.release", 0.8f },
             { "arp.follow", 1 }, { "arp.density", 0.6f }, { "arp.gate", 0.25f }, { "clk.div", 3 }, { "vcf1.cut", 600 }, { "vcf1.cv2", 0.4f },
@@ -373,18 +434,18 @@ const std::vector<Preset>& presets()
           { { "prog.mode", 9 }, { "prog.bars", 2 }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 3 }, { "arp.root", 45 },
             { "drn.type", 3 }, { "drn.oct", -2 }, { "drn.level", 0.3f },
             { "slime.play", 1 }, { "slime.voice", 0 }, { "slime.activity", 0.55f }, { "slime.weird", 0.3f }, { "slime.level", 0.5f },
-            { "pulse.on", 1 }, { "pulse.style", 5 }, { "pulse.level", 0.4f }, { "pulse.space", 0.7f },
+            { "pulse.on", 1 }, { "pulse.style", 5 }, { "pulse.level", 0.28f }, { "pulse.space", 0.7f },
             { "tex.on", 1 }, { "tex.a", 0 }, { "tex.b", 3 }, { "tex.blend", 0.5f }, { "tex.key", 0.8f }, { "tex.level", 0.35f },
             { "mem.on", 1 }, { "mem.speed", 5 }, { "mem.ago", 30.0f }, { "mem.level", 0.35f },
             { "dream.level", 0.15f }, { "hall.size", 0.92f }, { "hall.mix", 0.55f } } },
         { "Weird + calm", "Memory Hall", SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;lfo2.out>vco1.pwm;" DRONE_OUT,
-          { { "prog.mode", 2 }, { "prog.bars", 2 }, { "arp.scale", 1 }, { "arp.root", 36 }, { "arp.follow", 1 }, { "arp.density", 0.55f },
+          { { "dream.sound", 1 }, { "prog.mode", 2 }, { "prog.bars", 2 }, { "arp.scale", 1 }, { "arp.root", 36 }, { "arp.follow", 1 }, { "arp.density", 0.55f },
             { "env1.d", 0.25f }, { "vcf1.cut", 900 }, { "out.lvl1", 0.35f }, { "drn.level", 0.35f },
             { "mem.on", 1 }, { "mem.speed", 5 }, { "mem.ago", 25.0f }, { "mem.length", 7.0f }, { "mem.scatter", 0.6f }, { "mem.blur", 0.6f },
             { "mem.dissolve", 0.7f }, { "mem.level", 0.75f },
             { "echo.div", 3 }, { "echo.mix", 0.3f }, { "hall.size", 0.96f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.3f } } },
         { "Weird + calm", "Night Creatures", DRONE_OUT "lfo1.out>vcf2.cv1",
-          { { "prog.mode", 9 }, { "prog.bars", 3 }, { "prog.glide", 0.6f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 1 }, { "arp.root", 33 },
+          { { "dream.sound", 4 }, { "prog.mode", 9 }, { "prog.bars", 3 }, { "prog.glide", 0.6f }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 1 }, { "arp.root", 33 },
             { "drn.type", 2 }, { "drn.oct", -1 }, { "drn.level", 0.35f }, { "vcf2.cut", 700 }, { "vcf2.cv1", 0.35f }, { "lfo1.rate", 0.02f },
             { "tex.on", 1 }, { "tex.a", 4 }, { "tex.b", 2 }, { "tex.blend", 0.35f }, { "tex.key", 0.85f }, { "tex.level", 0.45f }, { "tex.density", 0.6f },
             { "slime.play", 1 }, { "slime.voice", 2 }, { "slime.activity", 0.3f }, { "slime.level", 0.4f },
@@ -395,9 +456,61 @@ const std::vector<Preset>& presets()
           { { "prog.mode", 7 }, { "prog.bars", 3 }, { "arp.scale", 0 }, { "arp.root", 40 }, { "clk.bpm", 104 }, { "clk.div", 3 },
             { "arp.density", 0.9f }, { "arp.mutate", 0.1f }, { "arp.follow", 1 }, { "vcf1.cut", 500 }, { "vcf1.res", 0.55f }, { "vcf1.cv2", 0.5f },
             { "lfo1.rate", 0.025f }, { "out.lvl1", 0.45f }, { "drn.level", 0.35f },
-            { "pulse.on", 1 }, { "pulse.style", 4 }, { "pulse.speed", 0 }, { "pulse.level", 0.35f }, { "pulse.tone", 0.4f }, { "pulse.space", 0.5f }, { "pulse.swing", 0.05f },
+            { "pulse.on", 1 }, { "pulse.style", 4 }, { "pulse.speed", 0 }, { "pulse.level", 0.24f }, { "pulse.tone", 0.4f }, { "pulse.space", 0.5f }, { "pulse.swing", 0.05f },
             { "loop.on", 1 }, { "loop.voices", 4 }, { "loop.length", 18.0f }, { "loop.level", 0.35f },
             { "echo.div", 2 }, { "echo.fb", 0.55f }, { "echo.mix", 0.35f }, { "hall.mix", 0.5f }, { "hall.shimmer", 0.3f } } },
+
+        //======================================================================  WORDS + BEATS
+        { "Words + beats", "Educational Film",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.pls>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
+          { { "dream.sound", 4 }, { "prog.mode", 5 }, { "prog.bars", 1 }, { "prog.glide", 0.25f }, { "prog.colour", 3 }, { "arp.scale", 6 }, { "arp.root", 38 }, { "clk.bpm", 86 },
+            { "arp.wave", 1 }, { "arp.shape", 0.35f }, { "arp.move", 0.3f }, { "vcf1.cut", 900 }, { "out.lvl1", 0.35f }, { "drn.level", 0.3f },
+            { "pulse.on", 1 }, { "pulse.style", 11 }, { "pulse.kit", 2 }, { "pulse.speed", 0 }, { "pulse.swing", 0.3f }, { "pulse.human", 0.35f },
+            { "pulse.level", 0.33f }, { "pulse.tone", 0.35f }, { "pulse.space", 0.3f }, { "pulse.density", 0.45f }, { "pulse.fill", 0.3f },
+            { "words.on", 1 }, { "words.often", 0.45f }, { "words.phrases", 0.6f }, { "words.speed", 0.86f }, { "words.wobble", 0.6f },
+            { "words.radio", 0.45f }, { "words.space", 0.45f }, { "words.level", 0.5f },
+            { "tape.wow", 0.55f }, { "tape.age", 0.6f }, { "hall.mix", 0.35f } } },
+        { "Words + beats", "Numbers on the Radio", DRONE_OUT,
+          { { "dream.sound", 6 }, { "prog.mode", 1 }, { "prog.bars", 3 }, { "arp.on", 0 }, { "out.lvl1", 0 }, { "arp.scale", 1 }, { "arp.root", 45 }, { "clk.bpm", 70 },
+            { "drn.type", 3 }, { "drn.level", 0.35f }, { "drn.oct", -1 }, { "vcf2.cut", 1400 },
+            { "words.on", 1 }, { "words.often", 0.6f }, { "words.phrases", 0.75f }, { "words.speed", 0.8f }, { "words.wobble", 0.35f },
+            { "words.radio", 0.85f }, { "words.space", 0.6f }, { "words.level", 0.55f }, { "words.repeat", 0.25f },
+            { "tex.on", 1 }, { "tex.a", 1 }, { "tex.b", 7 }, { "tex.level", 0.35f }, { "tex.density", 0.4f },
+            { "pulse.on", 1 }, { "pulse.style", 0 }, { "pulse.kit", 1 }, { "pulse.level", 0.3f }, { "pulse.space", 0.7f },
+            { "hall.mix", 0.55f }, { "hall.shimmer", 0.2f } } },
+        { "Words + beats", "Broken Tape Break",
+          SEQ_CORE "vco1.pls>mix.in1;vco2.saw>mix.in2;lfo2.out>vco1.pwm;" DRONE_OUT,
+          { { "prog.mode", 3 }, { "prog.bars", 2 }, { "arp.scale", 0 }, { "arp.root", 43 }, { "clk.bpm", 92 },
+            { "arp.wave", 4 }, { "arp.shape", 0.3f }, { "arp.fold", 0.15f }, { "vcf1.cut", 1100 }, { "out.lvl1", 0.35f }, { "drn.level", 0.25f },
+            { "pulse.on", 1 }, { "pulse.style", 11 }, { "pulse.kit", 2 }, { "pulse.speed", 0 }, { "pulse.swing", 0.22f }, { "pulse.level", 0.42f },
+            { "pulse.punch", 0.55f }, { "pulse.chop", 0.4f }, { "pulse.fill", 0.5f }, { "pulse.density", 0.55f }, { "pulse.space", 0.25f },
+            { "words.on", 1 }, { "words.often", 0.3f }, { "words.phrases", 0.3f }, { "words.repeat", 0.5f }, { "words.radio", 0.35f },
+            { "words.level", 0.45f }, { "tape.age", 0.5f }, { "echo.mix", 0.3f } } },
+        { "Words + beats", "Drill Garden",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.saw>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
+          { { "prog.mode", 6 }, { "prog.bars", 2 }, { "arp.scale", 4 }, { "arp.root", 41 }, { "clk.bpm", 88 },
+            { "arp.wave", 5 }, { "arp.table", 4 }, { "arp.shape", 0.3f }, { "arp.move", 0.6f }, { "vcf1.cut", 1400 }, { "out.lvl1", 0.32f },
+            { "pulse.on", 1 }, { "pulse.style", 13 }, { "pulse.kit", 6 }, { "pulse.speed", 0 }, { "pulse.stutter", 0.6f }, { "pulse.length", 5 },
+            { "pulse.level", 0.42f }, { "pulse.punch", 0.5f }, { "pulse.space", 0.35f }, { "pulse.density", 0.5f },
+            { "slime.play", 1 }, { "slime.voice", 4 }, { "slime.level", 0.5f }, { "slime.activity", 0.55f },
+            { "drn.level", 0.2f }, { "hall.mix", 0.4f }, { "echo.mix", 0.35f } } },
+        { "Words + beats", "Jungle Memory",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.sub>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
+          { { "prog.mode", 2 }, { "prog.bars", 2 }, { "arp.scale", 1 }, { "arp.root", 40 }, { "clk.bpm", 84 }, { "out.lvl1", 0.25f },
+            { "pulse.on", 1 }, { "pulse.style", 12 }, { "pulse.kit", 1 }, { "pulse.speed", 0 }, { "pulse.chop", 0.5f }, { "pulse.fill", 0.6f },
+            { "pulse.level", 0.4f }, { "pulse.punch", 0.45f }, { "pulse.space", 0.3f }, { "pulse.density", 0.6f },
+            { "mem.on", 1 }, { "mem.level", 0.3f }, { "mem.speed", 1 }, { "drn.level", 0.35f }, { "drn.type", 0 },
+            { "words.on", 1 }, { "words.often", 0.2f }, { "words.reverse", 0.4f }, { "words.level", 0.4f }, { "words.radio", 0.5f },
+            { "hall.mix", 0.45f } } },
+        { "Words + beats", "Wavetable Choir",
+          SEQ_CORE "vco1.saw>mix.in1;vco2.saw>mix.in2;lfo1.out>vcf1.cv2;" DRONE_OUT,
+          { { "dream.sound", 10 }, { "prog.mode", 1 }, { "prog.bars", 2 }, { "prog.glide", 0.4f }, { "arp.scale", 6 }, { "arp.root", 45 }, { "clk.bpm", 72 },
+            { "arp.wave", 5 }, { "arp.table", 1 }, { "arp.shape", 0.4f }, { "arp.move", 0.7f }, { "vcf1.cut", 2200 }, { "vcf1.res", 0.3f },
+            { "out.lvl1", 0.35f }, { "arp.density", 0.6f },
+            { "slime.play", 1 }, { "slime.voice", 7 }, { "slime.level", 0.5f },
+            { "loop.on", 1 }, { "loop.voices", 4 }, { "loop.length", 14.0f }, { "loop.level", 0.3f },
+            { "words.on", 1 }, { "words.often", 0.25f }, { "words.speed", 0.75f }, { "words.space", 0.8f }, { "words.level", 0.35f },
+            { "drn.level", 0.3f }, { "hall.mix", 0.6f }, { "hall.shimmer", 0.35f } } },
 
         //======================================================================  HANDS: the camera plays it
         { "Hands (camera)", "Hand Garden", nullptr,
@@ -424,7 +537,7 @@ const std::vector<Preset>& presets()
           "vcf1.out>vca1.in;cam.pinch>vca1.cv;vca1.out>out.in1;cam.tilt>vco2.fm;" DRONE_OUT "lfo1.out>vcf2.cv1",
           { { "cam.on", 1 }, { "cam.slew", 0.45f }, { "arp.on", 0 }, { "vco1.oct", 1 }, { "vco2.oct", 1 }, { "vco2.fine", 0.15f },
             { "vco2.fm", 0.4f }, { "vcf1.cut", 600 }, { "vcf1.cv1", 0.7f }, { "vcf1.res", 0.4f },
-            { "vca1.gain", 0.0f }, { "vca1.cv", 1.0f }, { "dream.level", 0.4f }, { "dream.chord", 3 },
+            { "vca1.gain", 0.0f }, { "vca1.cv", 1.0f }, { "dream.level", 0.4f }, { "dream.sound", 11 }, { "dream.chord", 3 },
             { "hall.mix", 0.65f }, { "hall.shimmer", 0.45f }, { "echo.mix", 0.35f }, { "echo.div", 4 } } },
     };
     return list;
@@ -468,6 +581,27 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("prog.glide", "Chord Glide", NRange (0.0f, 1.0f), 0.2f);
     ch ("scene.key", "New Scene Key", juce::StringArray { "KEEP", "NEAR", "ANY" }, 1);
     ch ("arp.follow", "Arp Harmony", arpFollowNames, 1);
+    ch ("arp.wave", "Arp Wave", arpWaveNames, 0);
+    {
+        StringArray banks;
+        for (int b = 0; b < dw::Wavetables::NumBanks; ++b) banks.add (dw::Wavetables::bankName (b));
+        ch ("arp.table", "Arp Wavetable", banks, 0);
+    }
+    fl ("arp.shape", "Arp Wave Shape", NRange (0.0f, 1.0f), 0.0f);
+    fl ("arp.fold", "Arp Wave Fold", NRange (0.0f, 1.0f), 0.0f);
+    fl ("arp.move", "Arp Wave Move", NRange (0.0f, 1.0f), 0.0f);
+    bo ("words.on", "Words On", false);
+    ch ("words.src", "Words Source", wordsSourceNames, 0);
+    fl ("words.level", "Words Level", NRange (0.0f, 1.0f), 0.5f);
+    fl ("words.often", "Words Often", NRange (0.0f, 1.0f), 0.4f);
+    fl ("words.phrases", "Words Phrases", NRange (0.0f, 1.0f), 0.5f);
+    fl ("words.speed", "Words Speed", skewed (0.5f, 1.5f, 0.9f), 0.9f);
+    fl ("words.wobble", "Words Wobble", NRange (0.0f, 1.0f), 0.4f);
+    fl ("words.radio", "Words Radio", NRange (0.0f, 1.0f), 0.3f);
+    fl ("words.reverse", "Words Reverse", NRange (0.0f, 1.0f), 0.1f);
+    fl ("words.repeat", "Words Repeat", NRange (0.0f, 1.0f), 0.1f);
+    fl ("words.space", "Words Space", NRange (0.0f, 1.0f), 0.5f);
+    bo ("words.beat", "Words On The Beat", true);
     in ("arp.len", "Arp Length", 1, 16, 16);
     fl ("arp.density", "Arp Density", NRange (0.0f, 1.0f), 0.82f);
     fl ("arp.mutate", "Arp Mutate", NRange (0.0f, 1.0f), 0.12f);
@@ -558,6 +692,7 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("dream.tone", "Dream Tone", NRange (0.0f, 1.0f), 0.3f);
     fl ("dream.warp", "Dream Warp", NRange (0.0f, 1.0f), 0.45f);
     fl ("dream.level", "Dream Level", NRange (0.0f, 1.0f), 0.55f);
+    ch ("dream.sound", "Dream Sound", dreamSoundNames(), 0);
     // Grain cloud
     fl ("grain.pos", "Grain Position", NRange (0.0f, 1.0f), 0.3f);
     fl ("grain.spray", "Grain Spray", NRange (0.0f, 1.0f), 0.3f);
@@ -648,6 +783,19 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("pulse.space", "Pulse Space", NRange (0.0f, 1.0f), 0.55f);
     fl ("pulse.vary", "Pulse Vary", NRange (0.0f, 1.0f), 0.2f);
     fl ("pulse.weird", "Pulse Weird", NRange (0.0f, 1.0f), 0.15f);
+    ch ("pulse.kit", "Pulse Kit", pulseKitNames, 0);
+    fl ("pulse.punch", "Pulse Punch", NRange (0.0f, 1.0f), 0.35f);
+    ch ("pulse.length", "Pulse Length", pulseLengthNames, 0);
+    fl ("pulse.fill", "Pulse Fill", NRange (0.0f, 1.0f), 0.2f);
+    fl ("pulse.stutter", "Pulse Stutter", NRange (0.0f, 1.0f), 0.0f);
+    fl ("pulse.chop", "Pulse Chop", NRange (0.0f, 1.0f), 0.0f);
+    for (int l = 0; l < 5; ++l)
+    {
+        const juce::String n (l + 1);
+        fl (("pulse.l" + n).toRawUTF8(), ("Pulse Drum " + n + " Level").toRawUTF8(), NRange (0.0f, 1.5f), 1.0f);
+        fl (("pulse.p" + n).toRawUTF8(), ("Pulse Drum " + n + " Pitch").toRawUTF8(), NRange (-12.0f, 12.0f, 1.0f), 0.0f);
+        fl (("pulse.d" + n).toRawUTF8(), ("Pulse Drum " + n + " Decay").toRawUTF8(), skewed (0.25f, 4.0f, 1.0f), 1.0f);
+    }
     // TEXTURE: weather and creatures
     bo ("tex.on", "Texture On", false);
     ch ("tex.a", "Texture A", texNames, 0);
@@ -677,6 +825,8 @@ DriftwerkProcessor::DriftwerkProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
       apvts (*this, nullptr, "DRIFTWERK", createLayout())
 {
+    dw::Wavetables::get();   // build the arp's wavetables now, not on the audio thread
+    synthWords = dw::SpeechSynth::makeBank();
     for (auto& m : monitor) m.store (0.0f);
     setPatchFromString (defaultPatch);
 
@@ -710,6 +860,14 @@ DriftwerkProcessor::DriftwerkProcessor()
     for (auto& x : pulseW) x.store (0.0f);
     for (auto& x : pulseF) x.store (0);
     for (auto& x : pulseLaneHits) x.store (0);
+    for (auto& x : pulseLanePos) x.store (-1);
+    for (int l = 0; l < pulseLanes; ++l)
+    {
+        const juce::String n (l + 1);
+        pulseLaneParams[l][0] = apvts.getRawParameterValue ("pulse.l" + n);
+        pulseLaneParams[l][1] = apvts.getRawParameterValue ("pulse.p" + n);
+        pulseLaneParams[l][2] = apvts.getRawParameterValue ("pulse.d" + n);
+    }
     for (auto& x : texEnergy) x.store (0.0f);
     for (auto& x : memPeaks) x.store (0.0f);
     for (int k = 0; k < 2; ++k) { memHeadAgo[(size_t) k].store (0.0f); memHeadWin[(size_t) k].store (0.0f); memHeadSpeed[(size_t) k].store (1.0f); }
@@ -793,6 +951,188 @@ bool DriftwerkProcessor::loadSample (const juce::File& f)
     return true;
 }
 
+//==============================================================================
+// DREAM: MY SOUND
+juce::StringArray DriftwerkProcessor::dreamSoundNames()
+{
+    juce::StringArray names;
+    for (int s = 0; s < dw::DreamBank::NumSounds; ++s) names.add (dw::DreamBank::soundName (s));
+    return names;
+}
+
+bool DriftwerkProcessor::loadDreamSound (const juce::File& f)
+{
+    juce::AudioFormatManager fm;
+    fm.registerBasicFormats();
+    std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+    if (reader == nullptr || reader->sampleRate < 1000.0) return false;
+
+    // The first 30 seconds, mixed to mono (each loop has its own place in the stereo field).
+    const int len = (int) std::min<juce::int64> (reader->lengthInSamples, (juce::int64) (reader->sampleRate * 30.0));
+    if (len < 256) return false;
+    juce::AudioBuffer<float> buf ((int) juce::jlimit (1u, 2u, reader->numChannels), len);
+    reader->read (&buf, 0, len, 0, true, buf.getNumChannels() > 1);
+
+    auto sd = std::make_unique<dw::SampleData>();
+    sd->sampleRate = reader->sampleRate;
+    sd->left.resize ((size_t) len);
+    const float* a = buf.getReadPointer (0);
+    const float* b = buf.getReadPointer (buf.getNumChannels() - 1);
+    for (int i = 0; i < len; ++i) sd->left[(size_t) i] = 0.5f * (a[i] + b[i]);
+    // Skip silence at the start, so every loop speaks the moment it strikes.
+    float peak = 0.0f;
+    for (auto x : sd->left) peak = std::max (peak, std::abs (x));
+    if (peak < 1.0e-4f) return false;
+    int start = 0;
+    while (start < len - 256 && std::abs (sd->left[(size_t) start]) < peak * 0.02f) ++start;
+    start = std::max (0, start - (int) (0.005 * reader->sampleRate));
+    sd->left.erase (sd->left.begin(), sd->left.begin() + start);
+    for (auto& x : sd->left) x *= 0.8f / peak;
+    sd->right = sd->left;
+    sd->rootMidi = dw::detectRootMidi (*sd);
+
+    dreamMine.store (sd.get(), std::memory_order_release);
+    dreamStore.push_back (std::move (sd));
+    dreamPath = f.getFullPathName();
+    updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    return true;
+}
+
+//==============================================================================
+// WORDS
+const dw::WordBank* DriftwerkProcessor::wordsBankNow() const
+{
+    const int src = (int) std::lround (apvts.getRawParameterValue ("words.src")->load());
+    if (src == 0)
+        if (auto* mine = userWords.load()) return mine;
+    return synthWords.get();
+}
+
+void DriftwerkProcessor::loadWords (const juce::StringArray& paths)
+{
+    if (paths.isEmpty() || wordsLoading.exchange (true)) return;
+    wordsLoader.addJob ([this, paths]
+    {
+        // Read the files (a folder gives every sound in it, in name order) as one long mono
+        // recording at 22 kHz, up to 20 minutes; then find the words in each.
+        juce::Array<juce::File> files;
+        for (const auto& path : paths)
+        {
+            const juce::File f (path);
+            if (f.isDirectory())
+            {
+                auto inside = f.findChildFiles (juce::File::findFiles, false, "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+                inside.sort();
+                files.addArray (inside);
+            }
+            else if (f.existsAsFile()) files.add (f);
+        }
+        juce::AudioFormatManager fm;
+        fm.registerBasicFormats();
+        auto bank = std::make_unique<dw::WordBank>();
+        bank->rate = 22050.0;
+        const double maxSeconds = 20.0 * 60.0;
+        int used = 0;
+        for (const auto& f : files)
+        {
+            if ((double) bank->audio.size() / bank->rate > maxSeconds) break;
+            std::unique_ptr<juce::AudioFormatReader> reader (fm.createReaderFor (f));
+            if (reader == nullptr || reader->sampleRate <= 0.0) continue;
+            const double step = reader->sampleRate / bank->rate;
+            const juce::int64 total = std::min<juce::int64> (reader->lengthInSamples,
+                (juce::int64) ((maxSeconds - (double) bank->audio.size() / bank->rate) * reader->sampleRate));
+            const int chunk = 65536;
+            juce::AudioBuffer<float> buf ((int) juce::jmax (1u, reader->numChannels), chunk);
+            dw::Svf aa1, aa2;   // keep what's above 10 kHz from folding down
+            aa1.set (9500.0f, 0.54f, (float) reader->sampleRate); aa2.set (9500.0f, 1.3f, (float) reader->sampleRate);
+            std::vector<float> mono, out;
+            double readPos = 0.0;
+            float prev = 0.0f;
+            const int from = (int) bank->audio.size();
+            for (juce::int64 at = 0; at < total; at += chunk)
+            {
+                const int n = (int) std::min<juce::int64> (chunk, total - at);
+                reader->read (&buf, 0, n, at, true, true);
+                mono.resize ((size_t) n);
+                for (int i = 0; i < n; ++i)
+                {
+                    float m = 0.0f;
+                    for (int c = 0; c < buf.getNumChannels(); ++c) m += buf.getSample (c, i);
+                    m /= (float) buf.getNumChannels();
+                    mono[(size_t) i] = aa2.lowpass (aa1.lowpass (m));
+                }
+                out.clear();
+                while (readPos < (double) n)
+                {
+                    const int i0 = (int) readPos;
+                    const float fr = (float) (readPos - (double) i0);
+                    const float a = i0 == 0 ? prev : mono[(size_t) i0 - 1], b = mono[(size_t) i0];
+                    out.push_back (a + (b - a) * fr);
+                    readPos += step;
+                }
+                readPos -= (double) n;
+                prev = mono.back();
+                bank->append (out.data(), (int) out.size(), 1.0f);
+            }
+            // each file is normalised on its own, so quiet and loud recordings sit together
+            int16_t peak = 1;
+            for (size_t i = (size_t) from; i < bank->audio.size(); ++i) peak = std::max<int16_t> (peak, (int16_t) std::abs ((int) bank->audio[i]));
+            const float g = std::min (8.0f, 0.7f * 32767.0f / (float) peak);
+            for (size_t i = (size_t) from; i < bank->audio.size(); ++i)
+                bank->audio[i] = (int16_t) juce::jlimit (-32767, 32767, (int) std::lround ((float) bank->audio[i] * g));
+            bank->slice (from);
+            for (int k = 0; k < (int) (0.3 * bank->rate); ++k) bank->audio.push_back (0);
+            ++used;
+        }
+        if (! bank->words.empty())
+        {
+            bank->name = (used == 1 ? files[0].getFileName() : juce::String (used) + " recordings").toStdString();
+            const juce::ScopedLock sl (wordBanksLock);
+            userWords.store (bank.get());
+            wordBanks.push_back (std::move (bank));
+            wordsPath = paths.joinIntoString ("\n");
+            wordsError.clear();
+        }
+        else
+        {
+            const juce::ScopedLock sl (wordBanksLock);
+            wordsError = files.isEmpty() ? juce::String ("no sound files there") : juce::String ("couldn't hear any words in them");
+        }
+        wordsLoading.store (false);
+    });
+}
+
+void DriftwerkProcessor::scheduleWords (int numSamples)
+{
+    const auto* bank = (p.wordsSrc == 0 && userWords.load() != nullptr) ? userWords.load() : synthWords.get();
+    wordsNowBank.store (bank, std::memory_order_relaxed);
+    if (! p.wordsOn || bank == nullptr || bank->words.empty()) return;
+    wordsWait -= (double) numSamples / sr;
+    if (wordsWait > 0.0) return;
+    auto& rng = weirdRng;
+    // How long until the next one: about 40 s apart at OFTEN 0, a couple of seconds at 1.
+    const double mean = 2.0 + 40.0 * (1.0 - p.wordsOften) * (1.0 - p.wordsOften);
+    wordsWait = mean * (0.4 + 1.2 * dw::uni (rng));
+    if (wordsPlayer.busy() && dw::uni (rng) < 0.7f) return;   // mostly one voice at a time
+    int first, count = 1;
+    if (dw::uni (rng) < p.wordsPhrases && ! bank->phrases.empty())
+    {
+        const auto& ph = bank->phrases[(size_t) std::min ((int) bank->phrases.size() - 1, (int) (dw::uni (rng) * (float) bank->phrases.size()))];
+        first = ph.first; count = juce::jmin (ph.count, 12);
+    }
+    else first = std::min ((int) bank->words.size() - 1, (int) (dw::uni (rng) * (float) bank->words.size()));
+    const float speed = p.wordsSpeed * (0.97f + 0.06f * dw::uni (rng));
+    const bool reverse = dw::uni (rng) < p.wordsReverse * 0.6f;
+    const int repeats = dw::uni (rng) < p.wordsRepeat ? 1 + (int) (dw::uni (rng) * (1.0f + 3.0f * p.wordsRepeat)) : 0;
+    float delay = 0.0f;
+    if (p.wordsBeat)   // start on the next beat
+    {
+        const double b = beatPos, next = std::ceil (b + 1.0e-6);
+        delay = (float) ((next - b) * samplesPerBeat / sr);
+    }
+    wordsPlayer.start (bank, first, count, speed, reverse, repeats, (dw::uni (rng) - 0.5f) * 0.6f, delay);
+}
+
 void DriftwerkProcessor::rollScene()
 {
     juce::Random r;
@@ -839,6 +1179,9 @@ void DriftwerkProcessor::rollScene()
         set ("dream.chord", (float) dc[r.nextInt (4)]);
         set ("drn.chord", (float) dr[r.nextInt (3)]);
     }
+    // A new DREAM sound most of the time (built-in ones only; MY SOUND stays if you chose it).
+    if ((int) std::lround (apvts.getRawParameterValue ("dream.sound")->load()) != dreamMySound && r.nextFloat() < 0.7f)
+        set ("dream.sound", (float) r.nextInt (dreamMySound));
     set ("lfo1.rate", 0.01f + r.nextFloat() * r.nextFloat() * 0.3f);
     set ("lfo2.rate", 0.02f + r.nextFloat() * r.nextFloat() * 1.5f);
     set ("lfo1.shape", (float) r.nextInt (4));
@@ -891,6 +1234,7 @@ void DriftwerkProcessor::setModFromString (const juce::String& s)
 DriftwerkProcessor::~DriftwerkProcessor()
 {
     apvts.removeParameterListener ("grain.src", this);
+    wordsLoader.removeAllJobs (false, 60000);   // let a words file that is loading finish first
     cancelPendingUpdate();
     stopRecording();
     cameraPoller = nullptr;
@@ -945,6 +1289,7 @@ void DriftwerkProcessor::prepareToPlay (double sampleRate, int)
     loopPitchKey = -1;
     slimeVoices.prepare ((float) sr);
     pulseDrums.prepare ((float) sr);
+    wordsPlayer.prepare ((float) sr);
     texture.prepare ((float) sr);
     memory.prepare ((float) sr);
     weirdPitchKey = -1;
@@ -1183,15 +1528,24 @@ void DriftwerkProcessor::updateBlockParams()
     p.loopOct = i ("loop.oct"); p.loopLevel = f ("loop.level"); p.loopLength = f ("loop.length"); p.loopColour = f ("loop.colour");
     p.loopTone = f ("loop.tone"); p.loopSwell = f ("loop.swell"); p.loopDecay = f ("loop.decay"); p.loopDrift = f ("loop.drift");
     p.loopWeird = f ("loop.weird");
-    p.slimePlay = f ("slime.play") > 0.5f; p.slimeVoice = juce::jlimit (0, 3, i ("slime.voice")); p.slimeLevel = f ("slime.level");
+    p.slimePlay = f ("slime.play") > 0.5f; p.slimeVoice = juce::jlimit (0, slimeVoiceNames.size() - 1, i ("slime.voice")); p.slimeLevel = f ("slime.level");
     p.slimeWeird = f ("slime.weird"); p.slimeRange = juce::jlimit (1, 3, i ("slime.range")); p.slimeOct = i ("slime.oct"); p.slimeTone = f ("slime.tone");
     organism.activity.store (f ("slime.activity"), std::memory_order_relaxed);
     organism.weird.store (p.slimeWeird, std::memory_order_relaxed);
     organism.growth.store (f ("slime.growth"), std::memory_order_relaxed);
     organism.earCount.store (juce::jlimit (3, Organism::maxEars, i ("slime.ears")), std::memory_order_relaxed);
-    p.pulseOn = f ("pulse.on") > 0.5f; p.pulseStyle = juce::jlimit (0, 5, i ("pulse.style")); p.pulseSpeed = juce::jlimit (0, 2, i ("pulse.speed"));
+    p.pulseOn = f ("pulse.on") > 0.5f; p.pulseStyle = juce::jlimit (0, pulseNumStyles - 1, i ("pulse.style")); p.pulseSpeed = juce::jlimit (0, 2, i ("pulse.speed"));
     p.pulseLevel = f ("pulse.level"); p.pulseDensity = f ("pulse.density"); p.pulseSwing = f ("pulse.swing"); p.pulseHuman = f ("pulse.human");
     p.pulseTone = f ("pulse.tone"); p.pulseSpace = f ("pulse.space"); p.pulseVary = f ("pulse.vary"); p.pulseWeird = f ("pulse.weird");
+    p.pulseKit = juce::jlimit (0, dw::Pulse::NumKits - 1, i ("pulse.kit")); p.pulseLength = juce::jlimit (0, 5, i ("pulse.length"));
+    p.pulsePunch = f ("pulse.punch"); p.pulseFill = f ("pulse.fill"); p.pulseStutter = f ("pulse.stutter"); p.pulseChop = f ("pulse.chop");
+    pulseDrums.kit = p.pulseKit; pulseDrums.punch = p.pulsePunch;
+    for (int l = 0; l < 5; ++l)
+    {
+        pulseDrums.laneLevel[l] = pulseLaneParams[l][0]->load();
+        pulseDrums.lanePitch[l] = pulseLaneParams[l][1]->load();
+        pulseDrums.laneDecay[l] = pulseLaneParams[l][2]->load();
+    }
     p.texOn = f ("tex.on") > 0.5f; p.texA = juce::jlimit (0, (int) dw::Texture::NumKinds - 1, i ("tex.a")); p.texB = juce::jlimit (0, (int) dw::Texture::NumKinds, i ("tex.b"));
     p.texLevel = f ("tex.level"); p.texBlend = f ("tex.blend"); p.texDensity = f ("tex.density"); p.texTone = f ("tex.tone");
     p.texMotion = f ("tex.motion"); p.texKey = f ("tex.key"); p.texSpace = f ("tex.space");
@@ -1199,6 +1553,12 @@ void DriftwerkProcessor::updateBlockParams()
     p.memLength = f ("mem.length"); p.memBlur = f ("mem.blur"); p.memScatter = f ("mem.scatter"); p.memDissolve = f ("mem.dissolve");
     p.vco1Oct = i ("vco1.oct"); p.vco1Fine = f ("vco1.fine"); p.vco1Pw = f ("vco1.pw"); p.vco1Pwm = f ("vco1.pwm"); p.vco1Fm = f ("vco1.fm");
     p.vco2Oct = i ("vco2.oct"); p.vco2Fine = f ("vco2.fine"); p.vco2Pw = f ("vco2.pw"); p.vco2Pwm = f ("vco2.pwm"); p.vco2Fm = f ("vco2.fm");
+    p.arpWave = juce::jlimit (0, dw::WaveOsc::NumWaves - 1, i ("arp.wave")); p.arpTable = juce::jlimit (0, dw::Wavetables::NumBanks - 1, i ("arp.table"));
+    p.arpShape = f ("arp.shape"); p.arpFold = f ("arp.fold"); p.arpMove = f ("arp.move");
+    p.wordsOn = f ("words.on") > 0.5f; p.wordsBeat = f ("words.beat") > 0.5f; p.wordsSrc = juce::jlimit (0, 1, i ("words.src"));
+    p.wordsLevel = f ("words.level"); p.wordsOften = f ("words.often"); p.wordsPhrases = f ("words.phrases"); p.wordsSpeed = f ("words.speed");
+    p.wordsWobble = f ("words.wobble"); p.wordsRadio = f ("words.radio"); p.wordsReverse = f ("words.reverse"); p.wordsRepeat = f ("words.repeat");
+    p.wordsSpace = f ("words.space");
     p.droneChord = p.droneChordUser = juce::jlimit (0, 5, i ("drn.chord")); p.droneOct = i ("drn.oct"); p.droneDetune = f ("drn.detune");
     p.droneDriftAmt = f ("drn.drift"); p.droneLevel = f ("drn.level");
     p.snhSlew = f ("nz.slew");
@@ -1219,6 +1579,7 @@ void DriftwerkProcessor::updateBlockParams()
     p.tune = f ("out.tune");
     p.dreamChord = p.dreamChordUser = juce::jlimit (0, 5, i ("dream.chord")); p.dreamRate = f ("dream.rate"); p.dreamTone = f ("dream.tone");
     p.dreamWarp = f ("dream.warp"); p.dreamLevel = f ("dream.level");
+    p.dreamSound = juce::jlimit (0, dw::DreamBank::NumSounds - 1, i ("dream.sound"));
     p.gPos = f ("grain.pos"); p.gSpray = f ("grain.spray"); p.gSize = f ("grain.size"); p.gDensity = f ("grain.density");
     p.gPitch = f ("grain.pitch"); p.gRev = f ("grain.reverse"); p.gScan = f ("grain.scan"); p.gLevel = f ("grain.level");
     p.tWow = f ("tape.wow"); p.tAge = f ("tape.age"); p.tHiss = f ("tape.hiss"); p.tCrush = f ("tape.crush");
@@ -1555,8 +1916,16 @@ void DriftwerkProcessor::playSlime (const Organism::Event& e)
     if (n == 0) return;
     const float pos = juce::jlimit (0.0f, 0.999f, e.x);
     const int idx = juce::jlimit (0, n - 1, (int) (pos * (float) n));
+    using SV = dw::SlimeVoices;
     int type = p.slimeVoice;
-    if (type == 3) type = e.y < 0.4f ? dw::SlimeVoices::Tine : (e.y < 0.7f ? dw::SlimeVoices::Drop : dw::SlimeVoices::Breath);
+    if (type == slimeMixed) type = e.y < 0.4f ? SV::Tine : (e.y < 0.7f ? SV::Drop : SV::Breath);
+    else if (type == slimeRandom)   // RANDOM: every ear has a voice of its own
+    {
+        static const int perEar[Organism::maxEars] { SV::Glass, SV::Pluck, SV::Marimba, SV::Drop, SV::Vowel, SV::Chirp,
+                                                     SV::Tine, SV::Bowed, SV::Bubble, SV::Breath, SV::Grain, SV::Glass };
+        type = perEar[juce::jlimit (0, Organism::maxEars - 1, e.ear)];
+    }
+    else if (type > slimeMixed) type -= 1;   // the menu has MIXED at 3, the voices carry on after it
     const float pan = (pos * 2.0f - 1.0f) * 0.8f;
     const float vel = 0.3f + 0.45f * e.strength + 0.15f * dw::uni (rng);
     const float detune = dw::uni (rng) < w * 0.35f ? (dw::uni (rng) * 2.0f - 1.0f) * (15.0f + 30.0f * w) : 0.0f;
@@ -1565,6 +1934,19 @@ void DriftwerkProcessor::playSlime (const Organism::Event& e)
     const bool reverse = dw::uni (rng) < w * 0.25f;
     const float tune = p.tune;
     slimeVoices.trigger (type, (float) notes[idx] + tune, vel, pan, 0.0f, detune, glide, reverse);
+    if (type == SV::Bubble || type == SV::Chirp)   // bubbles come in a little cluster, birds call a few times
+    {
+        const int more = 1 + (int) (dw::uni (rng) * (type == SV::Chirp ? 4.0f : 3.0f));
+        float delay = 0.0f;
+        for (int x = 0; x < more; ++x)
+        {
+            delay += type == SV::Chirp ? 0.09f + 0.06f * dw::uni (rng) : 0.04f + 0.12f * dw::uni (rng);
+            const float step = type == SV::Chirp ? (dw::uni (rng) < 0.5f ? 0.0f : (dw::uni (rng) < 0.5f ? -2.0f : 2.0f))
+                                                 : 3.0f + 9.0f * dw::uni (rng);
+            slimeVoices.trigger (type, (float) notes[idx] + tune + step, vel * (0.5f + 0.4f * dw::uni (rng)),
+                                 pan + (dw::uni (rng) - 0.5f) * 0.3f, delay, 0.0f, 0.0f, false);
+        }
+    }
     // WEIRD: a swarm of quiet neighbours
     if (dw::uni (rng) < w * 0.3f)
     {
@@ -1594,36 +1976,73 @@ void DriftwerkProcessor::slimeDrum (const Organism::Event& e)
 float DriftwerkProcessor::pulseFreq (int lane, int variant)
 {
     auto fold = [] (int m, int lo) { while (m < lo) m += 12; while (m >= lo + 12) m -= 12; return m; };
+    // Each kit tunes its drums to the key in its own register: low, snare, wood, (hat), tick.
+    static const int base[dw::Pulse::NumKits][dw::Pulse::Lanes] {
+        { 26, 45, 72, 0, 96 }, { 24, 52, 76, 0, 84 }, { 28, 52, 74, 0, 96 }, { 45, 69, 84, 0, 96 },
+        { 36, 57, 64, 0, 76 }, { 36, 60, 84, 0, 100 }, { 33, 55, 79, 0, 98 } };
+    const int* b = base[dw::Pulse::clampKit (p.pulseKit)];
     const int keyRoot = p.root + midiTranspose;
     auto& rng = weirdRng;
     const int tone = chordPcs[(int) (dw::uni (rng) * (float) juce::jmax (1, chordPcCount)) % juce::jmax (1, chordPcCount)];
     switch (lane)
     {
-        case dw::Pulse::Thump: return dw::midiToHz ((float) fold (keyRoot, 26) + p.tune);
-        case dw::Pulse::Skin:  return dw::midiToHz ((float) fold (keyRoot + chordOffsetTarget, 45) + p.tune);
-        case dw::Pulse::Wood:  return dw::midiToHz ((float) fold (tone, 72) + p.tune - (variant == 2 ? 12.0f : 0.0f));
+        case dw::Pulse::Thump: return dw::midiToHz ((float) fold (keyRoot, b[0]) + p.tune);
+        case dw::Pulse::Skin:  return dw::midiToHz ((float) fold (keyRoot + chordOffsetTarget, b[1]) + p.tune);
+        case dw::Pulse::Wood:  return dw::midiToHz ((float) fold (tone, b[2]) + p.tune - (variant == 2 ? 12.0f : 0.0f));
         case dw::Pulse::Brush: return 6200.0f * std::exp2 ((p.pulseTone - 0.5f) * 1.2f) * (0.85f + 0.3f * dw::uni (rng));
-        default:               return dw::midiToHz ((float) fold (tone, 96) + p.tune);
+        default:               return dw::midiToHz ((float) fold (tone, b[4]) + p.tune);
     }
 }
 
-void DriftwerkProcessor::pulseStep (int step, double stepSamples)
+int DriftwerkProcessor::pulseLaneLength (int lengthMode, int lane)
 {
-    pulseStepNow.store (step, std::memory_order_relaxed);
+    return pulseLengths[juce::jlimit (0, 5, lengthMode)][juce::jlimit (0, pulseLanes - 1, lane)];
+}
+
+void DriftwerkProcessor::pulseStep (long long k, double stepSamples)
+{
+    k = ((k % 720720) + 720720) % 720720;          // every lane length divides this, so the lanes stay in step
+    pulseStepNow.store ((int) k, std::memory_order_relaxed);
     auto& rng = weirdRng;
-    if (step == 0)   // VARY: each time round, a few steps change for one loop (not when the slime drums)
-        for (auto& f : pulseFlip) f = p.pulseStyle != pulseOrganismStyle && dw::uni (rng) < p.pulseVary * 0.16f;
-    const float swingDelay = (step % 2 == 1) ? p.pulseSwing * 0.5f * (float) stepSamples : 0.0f;
+    const bool organismStyle = p.pulseStyle == pulseOrganismStyle, drill = p.pulseStyle == pulseDrillStyle;
+    const bool glitchy = p.pulseKit >= 5;            // GLITCH and IDM roll more
+    const int inBar = (int) (k % 16), within = (int) (k % 4);
+    const long long bar = k / 16;
+    // CHOP: every four steps the beat may jump to another slice of the pattern, run backwards,
+    // or repeat one step (a beat-slicer).
+    if (within == 0)
+    {
+        chopChunk = -1; chopReverse = chopHold = false;
+        if (! organismStyle && p.pulseChop > 0.0f && dw::uni (rng) < p.pulseChop * 0.75f)
+        {
+            chopChunk = (int) (dw::uni (rng) * 4.0f) & 3;
+            chopReverse = dw::uni (rng) < p.pulseChop * 0.35f;
+            chopHold = ! chopReverse && dw::uni (rng) < p.pulseChop * 0.3f;
+        }
+    }
+    // FILL: the last four steps of every fourth bar may roll into the next.
+    if (inBar == 0) fillNow = false;
+    if (inBar == 12) fillNow = ! organismStyle && bar % 4 == 3 && dw::uni (rng) < p.pulseFill;
+    const float swingDelay = (k % 2 == 1) ? p.pulseSwing * 0.5f * (float) stepSamples : 0.0f;
     for (int lane = 0; lane < pulseLanes; ++lane)
     {
-        const int k = lane * pulseSteps + step;
-        bool on = pulseOn (lane, step, p.pulseDensity);
-        const bool flipped = pulseFlip[k];
+        const int len = pulseLaneLength (p.pulseLength, lane);
+        const int pos = (int) (k % len);
+        if (pos == 0)   // VARY: each time round, a few steps change for one loop (not when the slime drums)
+            for (int s = 0; s < pulseSteps; ++s)
+                pulseFlip[lane * pulseSteps + s] = ! organismStyle && dw::uni (rng) < p.pulseVary * 0.16f;
+        int src = pos;
+        if (chopChunk >= 0) src = (chopChunk * 4 + (chopHold ? 0 : (chopReverse ? 3 - within : within))) % len;
+        pulseLanePos[(size_t) lane].store (src, std::memory_order_relaxed);
+        const int idx = lane * pulseSteps + src;
+        bool on = pulseOn (lane, src, p.pulseDensity);
+        const bool flipped = pulseFlip[idx];
         if (flipped) on = ! on;
+        if (fillNow && inBar >= 12 && lane <= dw::Pulse::Wood) on = false;   // the fill takes over the drums
         if (! on) continue;
         if (dw::uni (rng) < p.pulseWeird * 0.1f) continue;               // WEIRD: a hit goes missing
-        const float w = pulseW[(size_t) k].load (std::memory_order_relaxed);
-        float vel = pulseF[(size_t) k].load (std::memory_order_relaxed) > 0 ? 0.8f : 0.4f + 0.5f * juce::jmin (1.0f, w);
+        const float w = pulseW[(size_t) idx].load (std::memory_order_relaxed);
+        float vel = pulseF[(size_t) idx].load (std::memory_order_relaxed) > 0 ? 0.8f : 0.4f + 0.5f * juce::jmin (1.0f, w);
         if (flipped) vel *= 0.55f;                                         // VARY's extra hits are ghost notes
         vel *= 1.0f + (dw::uni (rng) * 2.0f - 1.0f) * p.pulseHuman * 0.3f;
         const int wait = (int) (swingDelay + dw::uni (rng) * p.pulseHuman * 0.018f * (float) sr);
@@ -1631,13 +2050,32 @@ void DriftwerkProcessor::pulseStep (int step, double stepSamples)
         float pan = 0.0f;
         switch (lane)
         {
-            case dw::Pulse::Thump: variant = (step % 8 == 0) ? 0 : 1; break;
+            case dw::Pulse::Thump: variant = (src % 8 == 0) ? 0 : 1; break;
             case dw::Pulse::Skin:  variant = (w < 0.6f && dw::uni (rng) < 0.4f) ? 1 : 0; pan = -0.25f; break;
             case dw::Pulse::Wood:  variant = dw::uni (rng) < 0.15f ? 1 : (dw::uni (rng) < p.pulseWeird * 0.3f ? 2 : 0); pan = (dw::uni (rng) * 2.0f - 1.0f) * 0.5f; break;
-            case dw::Pulse::Brush: variant = dw::uni (rng) < p.pulseWeird * 0.3f ? 2 : ((step % 4 == 2 && dw::uni (rng) < 0.3f) ? 1 : 0); pan = (step % 4 < 2 ? -0.35f : 0.35f); break;
+            case dw::Pulse::Brush: variant = dw::uni (rng) < p.pulseWeird * 0.3f ? 2 : ((src % 4 == 2 && dw::uni (rng) < 0.3f) ? 1 : 0); pan = (src % 4 < 2 ? -0.35f : 0.35f); break;
             default:               variant = dw::uni (rng) < 0.2f ? 1 : 0; pan = (dw::uni (rng) * 2.0f - 1.0f) * 0.7f; break;
         }
+        if (chopReverse && (lane == dw::Pulse::Skin || lane == dw::Pulse::Brush) && dw::uni (rng) < 0.5f) variant = 2;   // backwards slices swell
         const float freq = pulseFreq (lane, variant) * (lane != dw::Pulse::Brush && dw::uni (rng) < p.pulseWeird * 0.15f ? 0.75f : 1.0f);
+        // STUTTER: the hit becomes a roll, faster or slower, its pitch sliding up or down.
+        const float rollChance = p.pulseStutter * 0.22f * (drill ? 2.0f : 1.0f) * (glitchy ? 1.4f : 1.0f) + (drill ? 0.05f : 0.0f);
+        if (dw::uni (rng) < rollChance)
+        {
+            static const int divs[] { 2, 3, 4, 6, 8 };
+            const int div = divs[juce::jlimit (0, 4, (int) (dw::uni (rng) * ((drill || glitchy) ? 5.0f : 3.0f)))];
+            const int reps = juce::jmin (2 * div, 2 + (int) (dw::uni (rng) * (2.0f + 6.0f * p.pulseStutter)));
+            const float slide = (dw::uni (rng) < 0.5f ? -1.0f : 1.0f) * dw::uni (rng) * (2.0f + 10.0f * p.pulseStutter);
+            const bool swell = dw::uni (rng) < 0.4f;
+            for (int r = 0; r < reps; ++r)
+            {
+                const float fr = reps > 1 ? (float) r / (float) (reps - 1) : 0.0f;
+                const float v = vel * (swell ? 0.35f + 0.65f * fr : 1.0f - 0.55f * fr);
+                pulseDrums.schedule (lane, v, freq * std::exp2 (slide * fr / 12.0f), juce::jlimit (-1.0f, 1.0f, pan + (fr - 0.5f) * 0.4f),
+                                     wait + (int) ((double) r * stepSamples / (double) div), variant);
+            }
+            continue;
+        }
         pulseDrums.schedule (lane, vel, freq, pan, wait, variant);
         if (dw::uni (rng) < p.pulseWeird * 0.15f)                          // WEIRD: a ratchet
         {
@@ -1645,6 +2083,25 @@ void DriftwerkProcessor::pulseStep (int step, double stepSamples)
             for (int r = 1; r <= reps; ++r)
                 pulseDrums.schedule (lane, vel * std::pow (0.55f, (float) r), freq, pan, wait + (int) ((double) r * stepSamples / 3.0), variant);
         }
+    }
+    // The fill itself: snare and wood climbing, in 32nds when FILL is high, and a backwards
+    // swell that lands on the next downbeat.
+    if (fillNow && inBar >= 12)
+    {
+        const int i = inBar - 12;
+        const int subs = (p.pulseFill > 0.5f && dw::uni (rng) < p.pulseFill) ? 2 : 1;
+        for (int s = 0; s < subs; ++s)
+        {
+            const float pos = ((float) i + (float) s / (float) subs) / 4.0f;          // 0..1 through the fill
+            const int wait = (int) (swingDelay + (double) s * stepSamples / (double) subs + dw::uni (rng) * p.pulseHuman * 0.01f * (float) sr);
+            const int lane = ((i + s) % 2 == 0) ? dw::Pulse::Skin : dw::Pulse::Wood;
+            const float pitch = std::exp2 ((lane == dw::Pulse::Skin ? 7.0f : -5.0f) * pos / 12.0f);
+            pulseDrums.schedule (lane, 0.45f + 0.45f * pos, pulseFreq (lane, 0) * pitch, -0.5f + pos, wait, 0);
+        }
+        if (i == 0) pulseDrums.schedule (dw::Pulse::Thump, 0.6f, pulseFreq (dw::Pulse::Thump, 1), 0.0f, (int) swingDelay, 1);
+        if (i == 3)
+            pulseDrums.schedule (dw::Pulse::Brush, 0.7f, pulseFreq (dw::Pulse::Brush, 2), 0.0f,
+                                 juce::jmax (0, (int) (stepSamples - 0.16 * sr)), 2);
     }
 }
 
@@ -1656,7 +2113,7 @@ void DriftwerkProcessor::generatePulse (int style)
         {
             const int k = lane * pulseSteps + step;
             float w = 0.0f;
-            if (style >= 0 && style < 5)
+            if (style >= 0 && style < pulseNumStyles)
             {
                 const float sw = pulseStyleW[style][lane][step];
                 w = sw > 0.0f ? sw * (0.62f + 0.76f * dw::uni (rng)) : (dw::uni (rng) < 0.08f ? 0.18f * dw::uni (rng) : 0.0f);
@@ -1881,16 +2338,35 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
                        + 12.0f * (in (I_VCO1_PITCH) + in (I_VCO1_FM) * p.vco1Fm * 2.0f);
         const double f1 = midiToHz (n1);
         const float pw1 = p.vco1Pw + in (I_VCO1_PWM) * p.vco1Pwm * 0.42f;
-        outs[O_VCO1_SAW] = 0.5f * vco1Saw.process (BlepOsc::Saw, f1, sr);
-        outs[O_VCO1_PULSE] = 0.5f * vco1Pulse.process (BlepOsc::Square, f1, sr, pw1);
+        // WAVE: when it is not PATCH, both main jacks play the chosen wave, so whatever is patched
+        // plays it. MOVE lets SHAPE follow the note (ENV 1) and a slow drift; PWM moves it too.
+        float shapeNow = p.arpShape;
+        if (p.arpWave != 0)
+        {
+            waveDriftPh += 0.07f / (float) sr; if (waveDriftPh >= 1.0f) waveDriftPh -= 1.0f;
+            shapeNow = clampf (p.arpShape + p.arpMove * (0.65f * outs[O_ENV1] + 0.3f * std::sin (kTwoPi * waveDriftPh))
+                               + in (I_VCO1_PWM) * p.vco1Pwm * 0.42f, 0.0f, 1.0f);
+            outs[O_VCO1_SAW] = outs[O_VCO1_PULSE] = 0.5f * wave1.process (p.arpWave, f1, sr, shapeNow, p.arpFold, p.arpTable);
+        }
+        else
+        {
+            outs[O_VCO1_SAW] = 0.5f * vco1Saw.process (BlepOsc::Saw, f1, sr);
+            outs[O_VCO1_PULSE] = 0.5f * vco1Pulse.process (BlepOsc::Square, f1, sr, pw1);
+        }
         outs[O_VCO1_SUB] = 0.5f * vco1Sub.process (BlepOsc::Square, f1 * 0.5, sr);
+        arpShapeNowLocal = shapeNow;
 
         const float n2 = baseNote + 12.0f * (float) p.vco2Oct + p.vco2Fine
                        + 12.0f * (in (I_VCO2_PITCH) + in (I_VCO2_FM) * p.vco2Fm * 2.0f);
         const double f2 = midiToHz (n2);
         const float pw2 = p.vco2Pw + in (I_VCO2_PWM) * p.vco2Pwm * 0.42f;
-        outs[O_VCO2_SAW] = 0.5f * vco2Saw.process (BlepOsc::Saw, f2, sr);
-        outs[O_VCO2_PULSE] = 0.5f * vco2Pulse.process (BlepOsc::Square, f2, sr, pw2);
+        if (p.arpWave != 0)
+            outs[O_VCO2_SAW] = outs[O_VCO2_PULSE] = 0.5f * wave2.process (p.arpWave, f2, sr, shapeNow, p.arpFold, p.arpTable);
+        else
+        {
+            outs[O_VCO2_SAW] = 0.5f * vco2Saw.process (BlepOsc::Saw, f2, sr);
+            outs[O_VCO2_PULSE] = 0.5f * vco2Pulse.process (BlepOsc::Square, f2, sr, pw2);
+        }
         outs[O_VCO2_SUB] = 0.5f * vco2Sub.process (BlepOsc::Square, f2 * 0.5, sr);
     }
 
@@ -1953,7 +2429,8 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     float dl = 0.0f, dr = 0.0f, gl = 0.0f, gr = 0.0f;
     {
         const float dm = dream.process (curHarm.iv, 6, chordBase,
-                                        p.dreamRate, p.dreamTone, p.dreamWarp, dl, dr);
+                                        p.dreamRate, p.dreamTone, p.dreamWarp, p.dreamSound,
+                                        dreamMine.load (std::memory_order_acquire), dl, dr);
         outs[O_DREAM] = dm * p.dreamLevel * 1.6f;
         dl *= p.dreamLevel; dr *= p.dreamLevel;
 
@@ -2016,7 +2493,7 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
         const long long k = (long long) std::floor (beat * upb);
         if (k != pulseLastK)
         {
-            if (pulseLastK == pulseNoStep || k == pulseLastK + 1) pulseStep ((int) (((k % 16) + 16) % 16), samplesPerBeat / upb);
+            if (pulseLastK == pulseNoStep || k == pulseLastK + 1) pulseStep (k, samplesPerBeat / upb);
             pulseLastK = k;
         }
     }
@@ -2025,7 +2502,7 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     {
         float a = 0.0f, b = 0.0f;
         pulseDrums.process (p.pulseTone, a, b);
-        const float g = p.pulseLevel * 1.5f;
+        const float g = p.pulseLevel * 2.2f;
         cl += a * g * p.pulseSpace; cr += b * g * p.pulseSpace;
         pdl = a * g * (1.0f - 0.8f * p.pulseSpace); pdr = b * g * (1.0f - 0.8f * p.pulseSpace);
     }
@@ -2038,6 +2515,17 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
         const float g = p.texLevel * 1.3f;
         cl += a * g * p.texSpace; cr += b * g * p.texSpace;
         tdl = a * g * (1.0f - 0.8f * p.texSpace); tdr = b * g * (1.0f - 0.8f * p.texSpace);
+    }
+
+    // ---- WORDS (the same: some into the space, the rest dry)
+    float wdl = 0.0f, wdr = 0.0f;
+    if (p.wordsOn || wordsPlayer.busy())
+    {
+        float a = 0.0f, b = 0.0f;
+        wordsPlayer.process (p.wordsWobble, p.wordsRadio, a, b);
+        const float g = p.wordsLevel * 1.8f;
+        cl += a * g * p.wordsSpace; cr += b * g * p.wordsSpace;
+        wdl = a * g * (1.0f - 0.75f * p.wordsSpace); wdr = b * g * (1.0f - 0.75f * p.wordsSpace);
     }
 
     bool dreamPatched = false, grainPatched = false;
@@ -2072,7 +2560,7 @@ void DriftwerkProcessor::renderSample (float& outL, float& outR)
     tape.process (l, r, p.tWow, p.tAge, p.tHiss, p.tCrush);
     echo.process (l, r, p.echoTime, p.echoFb, p.echoMix, p.echoWow);
     reverb.process (l, r, p.revSize, p.revDamp, p.revMix, p.shimmer);
-    l += pdl + tdl; r += pdr + tdr;
+    l += pdl + tdl + wdl; r += pdr + tdr + wdr;
 
     l *= p.vol * 2.0f; r *= p.vol * 2.0f;
     // DC blocker
@@ -2124,6 +2612,9 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
         organism.handY.store (outs[O_CAM_Y], std::memory_order_relaxed);
         organism.motion.store (outs[O_CAM_MOTION], std::memory_order_relaxed);
         organism.level.store (juce::jlimit (0.0f, 1.0f, outputLevel.load (std::memory_order_relaxed) * 1.6f), std::memory_order_relaxed);
+        scheduleWords (buffer.getNumSamples());
+        slimeVoices.grainSound = currentSample.load (std::memory_order_acquire);   // GRAIN SOUND plays this (never freed while we run)
+        slimeVoices.grainStart = p.gPos;
         Organism::Event e;
         while (organism.popEvent (e))
         {
@@ -2223,6 +2714,10 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     }
     {
         for (int l = 0; l < pulseLanes; ++l) pulseLaneHits[(size_t) l].store (pulseDrums.laneHits[l], std::memory_order_relaxed);
+        arpShapeNow.store (arpShapeNowLocal, std::memory_order_relaxed);
+        wordsNowWord.store (wordsPlayer.nowWord, std::memory_order_relaxed);
+        wordsNowLevel.store (wordsPlayer.nowLevel, std::memory_order_relaxed);
+        wordsPlayed.store (wordsPlayer.played, std::memory_order_relaxed);
         texEnergy[0].store (texture.s[0].energy, std::memory_order_relaxed);
         texEnergy[1].store (texture.s[1].energy, std::memory_order_relaxed);
         texEvents.store (texture.s[0].events + texture.s[1].events, std::memory_order_relaxed);
@@ -2269,10 +2764,52 @@ juce::String DriftwerkProcessor::getPresetGroup (int index)
     return {};
 }
 
+juce::File DriftwerkProcessor::userPresetFolder()
+{
+    return juce::File::getSpecialLocation (juce::File::userApplicationDataDirectory).getChildFile ("Timewind").getChildFile ("Presets");
+}
+
+juce::Array<juce::File> DriftwerkProcessor::userPresets()
+{
+    auto files = userPresetFolder().findChildFiles (juce::File::findFiles, false, "*.timewind");
+    struct ByName { static int compareElements (const juce::File& a, const juce::File& b)
+                    { return a.getFileNameWithoutExtension().compareNatural (b.getFileNameWithoutExtension()); } };
+    ByName cmp;
+    files.sort (cmp);
+    return files;
+}
+
+bool DriftwerkProcessor::saveUserPreset (const juce::String& name)
+{
+    const auto clean = juce::File::createLegalFileName (name.trim()).substring (0, 60);
+    if (clean.isEmpty()) return false;
+    const auto folder = userPresetFolder();
+    if (! folder.createDirectory()) return false;
+    userPresetName = clean;
+    juce::MemoryBlock mb;
+    getStateInformation (mb);
+    auto xml = getXmlFromBinary (mb.getData(), (int) mb.getSize());
+    if (xml == nullptr) return false;
+    return xml->writeTo (folder.getChildFile (clean + ".timewind"));
+}
+
+bool DriftwerkProcessor::loadUserPreset (const juce::File& f)
+{
+    auto xml = juce::XmlDocument::parse (f);
+    if (xml == nullptr) return false;
+    juce::MemoryBlock mb;
+    copyXmlToBinary (*xml, mb);
+    setStateInformation (mb.getData(), (int) mb.getSize());
+    userPresetName = f.getFileNameWithoutExtension();
+    updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
+    return true;
+}
+
 void DriftwerkProcessor::loadPreset (int index)
 {
     if (index < 0 || index >= getNumPresets()) return;
     currentProgram = index;
+    userPresetName.clear();
     const auto& pr = presets()[(size_t) index];
 
     // Work out every parameter's final value first (preset value, else default), then send
@@ -2285,6 +2822,10 @@ void DriftwerkProcessor::loadPreset (int index)
     if (auto* src = apvts.getParameter ("grain.src"))
         if ((int) std::lround (apvts.getRawParameterValue ("grain.src")->load()) == myFileSource && userSample != nullptr)
             target["grain.src"] = src->getValue();
+    // ...and so does your own sound in DREAM.
+    if (auto* ds = apvts.getParameter ("dream.sound"))
+        if ((int) std::lround (apvts.getRawParameterValue ("dream.sound")->load()) == dreamMySound && hasDreamSound())
+            target["dream.sound"] = ds->getValue();
 
     for (auto* param : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (param))
@@ -2310,9 +2851,15 @@ void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
     state.setProperty ("sample", samplePath, nullptr);
     state.setProperty ("program", currentProgram, nullptr);
     state.setProperty ("presetName", getPresetName (currentProgram), nullptr);
+    state.setProperty ("userPreset", userPresetName, nullptr);
     state.setProperty ("seq", getSequenceString(), nullptr);
     state.setProperty ("hits", getHitString(), nullptr);
     state.setProperty ("pulse", getPulseString(), nullptr);
+    {
+        const juce::ScopedLock sl (wordBanksLock);
+        if (wordsPath.isNotEmpty()) state.setProperty ("wordsPath", wordsPath, nullptr);
+    }
+    if (dreamPath.isNotEmpty()) state.setProperty ("dreamPath", dreamPath, nullptr);
     state.setProperty ("srcVersion", 2, nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -2345,11 +2892,14 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
             }
             if (juce::MessageManager::existsAndIsCurrentThread()) syncGrainSource();
             else triggerAsyncUpdate();
+            const juce::String dp = state.getProperty ("dreamPath", {}).toString();
+            if (dp.isNotEmpty() && dp != dreamPath && juce::File (dp).existsAsFile()) loadDreamSound (juce::File (dp));
             currentProgram = state.getProperty ("program", 0);
             const juce::String pn = state.getProperty ("presetName", {}).toString();
             for (int i = 0; i < getNumPresets(); ++i)
                 if (pn.isNotEmpty() && getPresetName (i) == pn) currentProgram = i;
             currentProgram = juce::jlimit (0, getNumPresets() - 1, currentProgram);
+            userPresetName = state.getProperty ("userPreset", {}).toString();
             const juce::String seq = state.getProperty ("seq", {}).toString();
             if (seq.isNotEmpty()) setSequenceString (seq);
             const juce::String hits = state.getProperty ("hits", {}).toString();
@@ -2359,6 +2909,16 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
             {
                 pulseStyleKnown.store ((int) std::lround (apvts.getRawParameterValue ("pulse.style")->load()));
                 setPulseString (pulse);
+            }
+            const juce::String wp = state.getProperty ("wordsPath", {}).toString();
+            juce::String have;
+            { const juce::ScopedLock sl (wordBanksLock); have = wordsPath; }
+            if (wp.isNotEmpty() && wp != have)
+            {
+                juce::StringArray paths;
+                for (const auto& line : juce::StringArray::fromLines (wp))
+                    if (juce::File::isAbsolutePath (line) && juce::File (line).exists()) paths.add (line);
+                loadWords (paths);
             }
         }
     }

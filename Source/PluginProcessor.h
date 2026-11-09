@@ -10,6 +10,9 @@
 #include "Sounds.h"
 #include "Harmony.h"
 #include "Weird.h"
+#include "Waves.h"
+#include "Dream.h"
+#include "Words.h"
 #include "Organism.h"
 
 class DriftwerkProcessor : public juce::AudioProcessor,
@@ -48,6 +51,13 @@ public:
     static juce::String getPresetGroup (int index);
     int getCurrentPreset() const { return currentProgram; }
     void loadPreset (int index);
+
+    // MY PRESETS: your own, saved as files in Timewind's folder (AppData/Roaming/Timewind/Presets).
+    static juce::File userPresetFolder();
+    static juce::Array<juce::File> userPresets();
+    bool saveUserPreset (const juce::String& name);
+    bool loadUserPreset (const juce::File& f);
+    juce::String userPresetName;   // the one of yours playing now (empty: a built-in one)
 
     void getStateInformation (juce::MemoryBlock& destData) override;
     void setStateInformation (const void* data, int sizeInBytes) override;
@@ -89,6 +99,13 @@ public:
     const dw::SampleData* getSampleForDisplay() const { return currentSample.load(); }
     juce::String getSampleName() const;
     bool hasUserSample() const { return userSample != nullptr; }
+
+    // DREAM's MY SOUND: a file the loops play, pitched to the chord (message thread).
+    static constexpr int dreamMySound = dw::DreamBank::MySound;
+    static juce::StringArray dreamSoundNames();
+    bool loadDreamSound (const juce::File& f);
+    bool hasDreamSound() const { return dreamMine.load() != nullptr; }
+    juce::String dreamPath;
 
     // A fresh random scene: key, scale, chords, rates, grain pitch and modulation patch.
     void rollScene();
@@ -160,6 +177,20 @@ public:
     std::array<std::atomic<int>, pulseLanes * pulseSteps> pulseF;
     std::array<std::atomic<int>, pulseLanes> pulseLaneHits;
     std::atomic<int> pulseStepNow { -1 }, pulseNewReq { 0 }, pulseStyleKnown { -1 };
+    std::atomic<float> arpShapeNow { 0.0f };   // the arp WAVE's SHAPE as it moves (for the editor)
+
+    // WORDS: your recordings cut into words and phrases (or the synthetic voice), drifting in.
+    void loadWords (const juce::StringArray& paths);       // files and/or folders; reads in the background
+    const dw::WordBank* wordsBankNow() const;               // what WORDS is speaking from (never freed while we run)
+    const dw::WordBank* myWords() const { return userWords.load(); }
+    juce::String wordsErrorText() const { const juce::ScopedLock sl (wordBanksLock); return wordsError; }
+    std::atomic<bool> wordsLoading { false };
+    std::atomic<int> wordsNowWord { -1 }, wordsPlayed { 0 };
+    std::atomic<float> wordsNowLevel { 0.0f };
+    std::atomic<const dw::WordBank*> wordsNowBank { nullptr };
+    juce::String wordsPath, wordsError;
+    std::array<std::atomic<int>, pulseLanes> pulseLanePos;   // the step each lane last played (CHOP moves it about)
+    static int pulseLaneLength (int lengthMode, int lane);
     bool pulseOn (int lane, int step, float density) const;
     bool pulseOnNow (int lane, int step) const;
     void setPulse (int lane, int step, bool on);
@@ -241,7 +272,10 @@ private:
     void slimeDrum (const Organism::Event& e);
     long long pulseLastK = -1;
     bool pulseFlip[dw::Pulse::Lanes * dw::Pulse::Steps] {};
-    void pulseStep (int step, double stepSamples);
+    void pulseStep (long long k, double stepSamples);
+    int chopChunk = -1;
+    bool chopReverse = false, chopHold = false, fillNow = false;
+    std::atomic<float>* pulseLaneParams[pulseLanes][3] {};
     void generatePulse (int style);
     float pulseFreq (int lane, int variant);
     int pulseNewSeen = 0, memForgetSeen = 0, memPeakSeen = 0;
@@ -328,6 +362,16 @@ private:
 
     // VCOs
     dw::BlepOsc vco1Saw, vco1Pulse, vco1Sub, vco2Saw, vco2Pulse, vco2Sub;
+    dw::WaveOsc wave1, wave2;          // the arp's WAVE (when it is not PATCH)
+    float waveDriftPh = 0.0f, arpShapeNowLocal = 0.0f;
+    std::unique_ptr<dw::WordBank> synthWords;
+    std::atomic<const dw::WordBank*> userWords { nullptr };
+    std::vector<std::unique_ptr<dw::WordBank>> wordBanks;   // every bank ever loaded stays alive (voices may hold one)
+    juce::CriticalSection wordBanksLock;
+    juce::ThreadPool wordsLoader { 1 };
+    dw::WordsPlayer wordsPlayer;
+    double wordsWait = 4.0;
+    void scheduleWords (int numSamples);
     // Drone bank: 6 detuned saws with independent drift
     dw::BlepOsc droneOsc[6];
     float droneDrift[6] {}, droneDriftTarget[6] {};
@@ -363,6 +407,9 @@ private:
     std::atomic<dw::SampleData*> currentSample { nullptr };
     std::vector<std::unique_ptr<dw::SampleData>> sampleStore; // keeps old samples alive (message thread)
     juce::String samplePath;
+    // DREAM files are never freed while the plugin lives: a loop may still be ringing one out.
+    std::vector<std::unique_ptr<dw::SampleData>> dreamStore;
+    std::atomic<const dw::SampleData*> dreamMine { nullptr };
     int lastCamTrigForScene = 0;
     double lastSceneTime = 0.0;
     void applyPlayMode();
@@ -394,12 +441,18 @@ private:
         bool pulseOn = false; int pulseStyle = 0, pulseSpeed = 1;
         float pulseLevel = 0.5f, pulseDensity = 0.5f, pulseSwing = 0.2f, pulseHuman = 0.3f, pulseTone = 0.45f, pulseSpace = 0.55f,
               pulseVary = 0.2f, pulseWeird = 0.15f;
+        int pulseKit = 0, pulseLength = 0;
+        float pulsePunch = 0.35f, pulseFill = 0.2f, pulseStutter = 0.0f, pulseChop = 0.0f;
         bool texOn = false; int texA = 0, texB = 0;
         float texLevel = 0.4f, texBlend = 0.4f, texDensity = 0.5f, texTone = 0.5f, texMotion = 0.5f, texKey = 0.5f, texSpace = 0.4f;
         bool memOn = false; int memSpeed = 1;
         float memLevel = 0.5f, memAgo = 30.0f, memLength = 5.0f, memBlur = 0.35f, memScatter = 0.4f, memDissolve = 0.35f;
         int vco1Oct = 0, vco2Oct = 0; float vco1Fine = 0, vco2Fine = 0, vco1Pw = 0.5f, vco2Pw = 0.5f;
         float vco1Pwm = 0.5f, vco2Pwm = 0.5f, vco1Fm = 0.0f, vco2Fm = 0.0f;
+        int arpWave = 0, arpTable = 0; float arpShape = 0.0f, arpFold = 0.0f, arpMove = 0.0f;
+        bool wordsOn = false, wordsBeat = true; int wordsSrc = 0;
+        float wordsLevel = 0.5f, wordsOften = 0.4f, wordsPhrases = 0.5f, wordsSpeed = 0.9f, wordsWobble = 0.4f, wordsRadio = 0.3f,
+              wordsReverse = 0.1f, wordsRepeat = 0.1f, wordsSpace = 0.5f;
         int droneChord = 1, droneOct = 0; float droneDetune = 0.4f, droneDriftAmt = 0.4f, droneLevel = 0.6f;
         float snhSlew = 0.3f;
         float lfo1Rate = 0.03f, lfo2Rate = 0.07f; int lfo1Shape = 0, lfo2Shape = 1;
@@ -413,6 +466,7 @@ private:
         float revSize = 0.75f, revDamp = 0.5f, revMix = 0.4f;
         float camSlew = 0.3f, tune = 0.0f;
         int dreamChord = 0; float dreamRate = 1, dreamTone = 0.3f, dreamWarp = 0.4f, dreamLevel = 0.5f;
+        int dreamSound = 0;
         float gPos = 0.3f, gSpray = 0.3f, gSize = 0.2f, gDensity = 12, gPitch = 0, gRev = 0.2f, gScan = 0.1f, gLevel = 0.4f;
         float tWow = 0.3f, tAge = 0.3f, tHiss = 0.2f, tCrush = 0.0f, shimmer = 0.3f;
     } p;

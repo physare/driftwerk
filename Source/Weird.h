@@ -14,11 +14,13 @@ inline float uni (Random& r) { return std::min (0.9999f, r.next() * 0.5f + 0.5f)
 //==============================================================================
 // SLIME VOICES: short calm notes, played when a vein of the organism reaches one of its ears.
 // DROPS are water drops (a sine that falls into its note), BREATH is blown noise around the
-// note, TINES are little metal tongues (kalimba-like, slightly inharmonic).
+// note, TINES are little metal tongues (slightly inharmonic). GLASS is a struck glass (FM),
+// PLUCK a plucked string, MARIMBA a wooden bar, VOICE a sung vowel, BOWED a slow bowed swell,
+// BUBBLES rise and pop, CHIRPS are little birds, and GRAIN plays the GRAIN sound at the note.
 struct SlimeVoices
 {
-    static constexpr int V = 12;
-    enum Type { Drop = 0, Breath = 1, Tine = 2 };
+    static constexpr int V = 12, KS = 8192;
+    enum Type { Drop = 0, Breath, Tine, Glass, Pluck, Marimba, Vowel, Bowed, Bubble, Chirp, Grain, NumTypes };
     struct Voice
     {
         bool on = false, reverse = false;
@@ -27,17 +29,38 @@ struct SlimeVoices
         float bendFrom = 0.0f, bendTime = 0.03f, glide = 0.0f, glideTime = 0.3f;
         float atk = 0.002f, len = 1.0f, env = 0.0f, nGain = 1.0f;
         double ph1 = 0.0, ph2 = 0.0, ph3 = 0.0;
-        Svf bp1, bp2;
+        Svf bp1, bp2, bp3;
+        float fm = 0.0f, lp = 0.0f, prev = 0.0f, damp = 0.998f, bright = 0.5f, dcx = 0.0f, dcy = 0.0f;
+        int ksW = 0, excite = 0;
+        const SampleData* sd = nullptr;
+        double spos = 0.0;
     };
     Voice v[V];
+    std::vector<float> ks[V];          // PLUCK strings (allocated in prepare)
     Random rng { 0x5117E5u };
     float sr = 44100.0f;
     Svf toneL, toneR;
     int coefCounter = 0;
+    const SampleData* grainSound = nullptr;   // set by the processor: the GRAIN sound (kept alive by it)
+    float grainStart = 0.3f;                  // where in it GRAIN notes start (0..1)
 
-    void prepare (float sampleRate) { sr = sampleRate; for (auto& vo : v) vo.on = false; }
+    void prepare (float sampleRate)
+    {
+        sr = sampleRate;
+        for (auto& vo : v) vo.on = false;
+        for (auto& b : ks) b.assign ((size_t) KS, 0.0f);
+    }
 
     bool anySounding() const { for (auto& vo : v) if (vo.on) return true; return false; }
+
+    static float blep (double ph, double inc)
+    {
+        float t = (float) ph, dt = (float) inc;
+        if (t < dt) { t /= dt; return t + t - t * t - 1.0f; }
+        if (t > 1.0f - dt) { t = (t - 1.0f) / dt; return t * t + t + t + 1.0f; }
+        return 0.0f;
+    }
+    static float saw (double ph, double inc) { return (float) (2.0 * ph - 1.0) - blep (ph, inc); }
 
     // note: MIDI. delaySec: when it starts. glideFrom: semitones it slides in from (0 = none).
     void trigger (int type, float note, float vel, float pan, float delaySec, float detuneCents, float glideFrom, bool reverse)
@@ -52,7 +75,7 @@ struct SlimeVoices
         auto& vo = v[best];
         vo = Voice {};
         vo.on = true;
-        vo.type = type;
+        vo.type = type < 0 || type >= NumTypes ? 0 : type;
         vo.reverse = reverse;
         vo.note = note + detuneCents * 0.01f;
         vo.vel = vel;
@@ -60,17 +83,46 @@ struct SlimeVoices
         vo.delay = delaySec;
         vo.glide = glideFrom;
         vo.glideTime = 0.25f + 0.5f * uni (rng);
-        switch (type)
+        const float f = midiToHz (vo.note);
+        switch (vo.type)
         {
-            case Drop:   vo.bendFrom = 6.0f + 7.0f * uni (rng); vo.bendTime = 0.018f + 0.02f * uni (rng);
-                         vo.atk = 0.0015f; vo.len = 0.35f + 0.6f * uni (rng); break;
-            case Breath: vo.atk = 0.2f + 0.45f * uni (rng); vo.len = 1.4f + 1.4f * uni (rng); break;
-            default:     vo.atk = 0.001f; vo.len = 1.2f + 1.6f * uni (rng); break;
+            case Drop:    vo.bendFrom = 6.0f + 7.0f * uni (rng); vo.bendTime = 0.018f + 0.02f * uni (rng);
+                          vo.atk = 0.0015f; vo.len = 0.35f + 0.6f * uni (rng); break;
+            case Breath:  vo.atk = 0.2f + 0.45f * uni (rng); vo.len = 1.4f + 1.4f * uni (rng); break;
+            case Glass:   vo.atk = 0.0015f; vo.len = 1.6f + 1.6f * uni (rng); vo.fm = 1.2f + 1.4f * uni (rng); break;
+            case Pluck:
+            {
+                vo.atk = 0.001f; vo.len = 2.0f + 1.5f * uni (rng);
+                vo.bright = 0.35f + 0.5f * uni (rng);
+                // how long the string rings: about len seconds whatever the note
+                const float loops = f * vo.len * 0.6f;
+                vo.damp = std::pow (0.001f, 1.0f / std::max (1.0f, loops));
+                vo.excite = (int) clampf (sr / f, 2.0f, (float) KS - 4.0f);
+                std::fill (ks[best].begin(), ks[best].end(), 0.0f);
+                break;
+            }
+            case Marimba: vo.atk = 0.001f; vo.len = 0.8f + 0.7f * uni (rng); break;
+            case Vowel:
+            {
+                vo.atk = 0.25f + 0.3f * uni (rng); vo.len = 1.6f + 1.2f * uni (rng);
+                float fm3[3]; vowelFormants (uni (rng) * 0.75f, fm3);
+                vo.bp1.set (fm3[0], 9.0f, sr); vo.bp2.set (fm3[1], 11.0f, sr); vo.bp3.set (fm3[2], 14.0f, sr);
+                break;
+            }
+            case Bowed:   vo.atk = 0.5f + 0.6f * uni (rng); vo.len = 2.6f + 1.6f * uni (rng); vo.bp1.set (std::min (f * 5.0f, 9000.0f), 0.8f, sr); break;
+            case Bubble:  vo.atk = 0.001f; vo.len = 0.09f + 0.12f * uni (rng); break;
+            case Chirp:   vo.atk = 0.004f; vo.len = 0.12f + 0.16f * uni (rng); vo.fm = 18.0f + 22.0f * uni (rng); break;
+            case Grain:
+                vo.sd = grainSound;
+                vo.atk = 0.006f; vo.len = 1.0f + 1.0f * uni (rng);
+                if (vo.sd != nullptr && vo.sd->length() > 16)
+                    vo.spos = (double) clampf (grainStart + (uni (rng) - 0.5f) * 0.06f, 0.0f, 0.95f) * (double) vo.sd->length();
+                break;
+            default:      vo.atk = 0.001f; vo.len = 1.2f + 1.6f * uni (rng); break;
         }
         if (reverse) vo.len = std::max (vo.len, 0.9f) * 1.3f;
-        if (type == Breath)
+        if (vo.type == Breath)
         {
-            const float f = midiToHz (vo.note);
             vo.bp1.set (f, 38.0f, sr);
             vo.bp2.set (f * 2.0f, 30.0f, sr);
             vo.nGain = 0.55f * std::sqrt (38.0f * sr * 0.5f / std::max (60.0f, f));
@@ -87,8 +139,9 @@ struct SlimeVoices
         }
         const float dt = 1.0f / sr;
         float ol = 0.0f, orr = 0.0f;
-        for (auto& vo : v)
+        for (int vi = 0; vi < V; ++vi)
         {
+            auto& vo = v[vi];
             if (! vo.on) continue;
             if (vo.delay > 0.0f) { vo.delay -= dt; continue; }
             vo.t += dt;
@@ -112,6 +165,11 @@ struct SlimeVoices
             float pitch = vo.note;
             if (vo.bendFrom != 0.0f && ! vo.reverse) pitch += vo.bendFrom * std::exp (-vo.t / vo.bendTime);
             if (vo.glide != 0.0f) pitch += vo.glide * std::exp (-vo.t / vo.glideTime);
+            if ((vo.type == Vowel || vo.type == Bowed) && vo.t > 0.3f)   // a slow vibrato once the note settles
+                pitch += 0.12f * std::min (1.0f, (vo.t - 0.3f) * 1.5f) * std::sin (kTwoPi * 5.1f * vo.t + (float) vi);
+            if (vo.type == Bubble) pitch += -7.0f + 19.0f * (1.0f - std::exp (-vo.t / (vo.len * 0.45f)));   // bubbles rise
+            if (vo.type == Chirp)                                                                         // a bird: a quick fall, then a trill
+                pitch += 24.0f + 9.0f * std::exp (-vo.t / 0.025f) + 1.2f * std::sin (kTwoPi * vo.fm * vo.t);
             const float f = midiToHz (pitch);
             float y = 0.0f;
             switch (vo.type)
@@ -133,6 +191,99 @@ struct SlimeVoices
                     vo.ph1 += f / sr; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
                     y = (b1 + 0.35f * b2) * vo.nGain * 0.5f + 0.3f * std::sin (kTwoPi * (float) vo.ph1);
                     y *= e;
+                    break;
+                }
+                case Glass:   // a struck glass: an inharmonic FM shimmer that fades into a pure tone
+                {
+                    vo.ph1 += f / sr; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
+                    vo.ph2 += f * 3.53f / sr; if (vo.ph2 >= 1.0) vo.ph2 -= 1.0;
+                    vo.ph3 += f * 2.76f / sr; if (vo.ph3 >= 1.0) vo.ph3 -= 1.0;
+                    const float idx = vo.fm * (vo.reverse ? e : std::exp (-vo.t / (vo.len * 0.12f)));
+                    y = std::sin (kTwoPi * (float) vo.ph1 + idx * std::sin (kTwoPi * (float) vo.ph2))
+                        + 0.12f * std::sin (kTwoPi * (float) vo.ph3) * (vo.reverse ? e : std::exp (-vo.t / (vo.len * 0.2f)));
+                    y *= e * 0.75f;
+                    break;
+                }
+                case Pluck:   // a plucked string (Karplus-Strong)
+                {
+                    auto& b = ks[vi];
+                    const float d = clampf (sr / f - 0.5f, 2.0f, (float) KS - 4.0f);
+                    float rp = (float) vo.ksW - d;
+                    while (rp < 0.0f) rp += (float) KS;
+                    const int i0 = (int) rp; const float fr = rp - (float) i0;
+                    const float out = b[(size_t) i0] + (b[(size_t) ((i0 + 1) & (KS - 1))] - b[(size_t) i0]) * fr;
+                    float nx = vo.damp * 0.5f * (out + vo.prev);
+                    vo.prev = out;
+                    if (vo.excite > 0)
+                    {
+                        --vo.excite;
+                        vo.lp += (rng.next() - vo.lp) * vo.bright;   // a softer or brighter pluck
+                        nx += vo.lp;
+                    }
+                    b[(size_t) vo.ksW] = nx;
+                    vo.ksW = (vo.ksW + 1) & (KS - 1);
+                    vo.dcy = out - vo.dcx + 0.995f * vo.dcy; vo.dcx = out;   // no DC rumble from the string
+                    y = vo.dcy * (vo.reverse ? e : std::min (1.0f, e * 1.6f)) * 3.6f;
+                    break;
+                }
+                case Marimba: // a wooden bar: a round fundamental, a quick fourth harmonic and a tick
+                {
+                    vo.ph1 += f / sr; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
+                    vo.ph2 += f * 3.99f / sr; if (vo.ph2 >= 1.0) vo.ph2 -= 1.0;
+                    vo.ph3 += f * 9.85f / sr; if (vo.ph3 >= 1.0) vo.ph3 -= 1.0;
+                    const float e2 = vo.reverse ? e * e : std::exp (-vo.t / (vo.len * 0.09f));
+                    const float e3 = vo.reverse ? e * e * e : std::exp (-vo.t / (vo.len * 0.025f));
+                    y = std::sin (kTwoPi * (float) vo.ph1) * e + 0.35f * std::sin (kTwoPi * (float) vo.ph2) * e2
+                        + 0.12f * std::sin (kTwoPi * (float) vo.ph3) * e3;
+                    if (vo.t < 0.004f) y += rng.next() * 0.25f * (1.0f - vo.t / 0.004f);
+                    y *= 0.65f;
+                    break;
+                }
+                case Vowel:   // a sung vowel: a soft buzz through three formants
+                {
+                    const double inc = f / sr;
+                    vo.ph1 += inc; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
+                    const float src = saw (vo.ph1, inc) + 0.05f * rng.next();
+                    float lp;
+                    const float fo = vo.bp1.process (src, lp) / 9.0f + 0.6f * vo.bp2.process (src, lp) / 11.0f
+                                   + 0.25f * vo.bp3.process (src, lp) / 14.0f;
+                    vo.ph2 += f / sr; if (vo.ph2 >= 1.0) vo.ph2 -= 1.0;
+                    y = (fo * 2.2f + 0.25f * std::sin (kTwoPi * (float) vo.ph2)) * e;
+                    break;
+                }
+                case Bowed:   // a bowed string swelling: two saws, a little apart, through a soft filter
+                {
+                    const double i1 = f / sr, i2 = f * 1.0035 / sr;
+                    vo.ph1 += i1; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
+                    vo.ph2 += i2; if (vo.ph2 >= 1.0) vo.ph2 -= 1.0;
+                    const float src = saw (vo.ph1, i1) + saw (vo.ph2, i2) + 0.08f * rng.next() * e;
+                    y = vo.bp1.lowpass (src) * 0.42f * e;
+                    break;
+                }
+                case Bubble:
+                {
+                    vo.ph1 += f / sr; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
+                    y = std::sin (kTwoPi * (float) vo.ph1) * e * 1.1f;
+                    break;
+                }
+                case Chirp:
+                {
+                    vo.ph1 += f / sr; if (vo.ph1 >= 1.0) vo.ph1 -= 1.0;
+                    y = std::sin (kTwoPi * (float) vo.ph1) * e * 1.7f;
+                    break;
+                }
+                case Grain:   // the GRAIN sound, played at the note
+                {
+                    const auto* sd = vo.sd;
+                    const int n = sd != nullptr ? sd->length() : 0;
+                    if (n < 16) { vo.on = false; continue; }
+                    const float root = sd->rootMidi >= 0.0f ? sd->rootMidi : 60.0f;
+                    vo.spos += std::exp2 ((pitch - root) / 12.0f) * sd->sampleRate / sr;
+                    if (vo.spos >= (double) (n - 2)) { vo.on = false; continue; }
+                    const int i0 = (int) vo.spos; const float fr = (float) (vo.spos - (double) i0);
+                    const float a = 0.5f * (sd->left[(size_t) i0] + (sd->right.empty() ? sd->left[(size_t) i0] : sd->right[(size_t) i0]));
+                    const float b = 0.5f * (sd->left[(size_t) i0 + 1] + (sd->right.empty() ? sd->left[(size_t) i0 + 1] : sd->right[(size_t) i0 + 1]));
+                    y = (a + (b - a) * fr) * e * 4.5f;
                     break;
                 }
                 default:
@@ -157,22 +308,96 @@ struct SlimeVoices
 };
 
 //==============================================================================
-// PULSE: soft percussion, synthesised. Five lanes: THUMP (a low heartbeat), SKIN (a hand
-// drum), WOOD (a tuned block), BRUSH (brushed noise) and TICK (a tiny clock bell).
+// PULSE: percussion, all synthesised. Five lanes (low, backbeat, tuned accent, noise, tiny high)
+// and six KITS that decide what each lane is: SOFT (thump, hand drum, wood, brush, tick),
+// DEEP (boom, snare, rim, hat, bell), DUSTY (lo-fi kick, snare, rim, hat, shaker), GLASS (gong,
+// glass, chime, shimmer, spark), HANDS (djembe bass and tone, tabla, shaker, clap), GLITCH and IDM
+// (crisp and digital, made for STUTTER rolls).
 struct Pulse
 {
-    static constexpr int Lanes = 5, Steps = 16;
+    static constexpr int Lanes = 5, Steps = 16, NumKits = 7;
     enum Lane { Thump = 0, Skin = 1, Wood = 2, Brush = 3, Tick = 4 };
+
+    // How one lane of one kit is made: a tone (with a pitch drop, FM and two more modes),
+    // filtered noise, a click and some drive.
+    struct VoiceDef
+    {
+        float tone, bend, bendT, tau;          // tone level, pitch drop (x the note), its time, decay (s)
+        float r2, a2, k2, r3, a3, k3;          // two more modes: ratio, level, decay (x tau)
+        float fmR, fmI, fmT;                   // FM ratio, index, index decay (s)
+        float noise, nf, nq, ntau, natk;       // noise level, centre (Hz), Q, decay (s), attack (s)
+        float click, drive, gain;
+        float altPitch, altTau;                // variant 1: pitch and decay multipliers
+        int bursts;                            // a clap: the noise starts this many times
+    };
+    static const VoiceDef& def (int kit, int lane)
+    {
+        static const VoiceDef defs[NumKits][Lanes] {
+            {   // SOFT
+                { 1.0f, 1.4f, 0.022f, 0.24f,  2.0f, 0.18f, 0.5f,  0, 0, 1,  0, 0, 1,  0.0f, 900, 1, 0.01f, 0.001f,  0.15f, 0.25f, 1.0f,  1.0f, 0.6f, 1 },
+                { 0.7f, 0.22f, 0.035f, 0.17f, 1.59f, 0.3f, 0.45f, 0, 0, 1,  0, 0, 1,  0.3f, 900, 1.2f, 0.012f, 0.0005f, 0.1f, 0.1f, 1.0f,  2.1f, 0.35f, 1 },
+                { 0.6f, 0.0f, 0.01f, 0.075f,  2.76f, 0.45f, 0.33f, 5.4f, 0.15f, 0.16f, 0, 0, 1,  0.0f, 900, 1, 0.01f, 0.001f, 0.05f, 0.0f, 1.0f,  1.0f, 2.1f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.05f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.55f, 6200, 0.9f, 0.045f, 0.0025f, 0.0f, 0.0f, 1.0f,  1.0f, 2.4f, 1 },
+                { 0.4f, 0.0f, 0.01f, 0.028f,  1, 0, 1, 0, 0, 1,  3.01f, 1.3f, 0.008f,  0.0f, 900, 1, 0.01f, 0.001f, 0.0f, 0.0f, 1.0f,  1.0f, 3.2f, 1 } },
+            {   // DEEP: a long boom, a snappy snare, a rim, a closed hat, a bell
+                { 1.0f, 2.2f, 0.035f, 0.75f,  2.0f, 0.1f, 0.4f,  0, 0, 1,  0, 0, 1,  0.0f, 900, 1, 0.01f, 0.001f,  0.35f, 0.45f, 1.1f,  1.0f, 0.45f, 1 },
+                { 0.5f, 0.6f, 0.02f, 0.09f,   1.48f, 0.4f, 0.6f,  0, 0, 1,  0, 0, 1,  0.85f, 2600, 0.7f, 0.15f, 0.0005f, 0.3f, 0.3f, 1.0f,  1.0f, 0.5f, 1 },
+                { 0.7f, 0.1f, 0.005f, 0.035f, 2.3f, 0.5f, 0.6f, 4.1f, 0.2f, 0.4f, 0, 0, 1,  0.15f, 3000, 1.5f, 0.01f, 0.0003f, 0.3f, 0.2f, 1.0f,  1.0f, 2.5f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.03f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.6f, 9000, 0.8f, 0.03f, 0.0008f, 0.1f, 0.1f, 1.1f,  1.0f, 5.0f, 1 },
+                { 0.5f, 0.0f, 0.01f, 0.35f,   1.48f, 0.7f, 0.9f, 0, 0, 1,  2.0f, 0.6f, 0.05f,  0.0f, 900, 1, 0.01f, 0.001f, 0.05f, 0.25f, 0.9f,  1.0f, 0.3f, 1 } },
+            {   // DUSTY: a lo-fi break
+                { 1.0f, 1.8f, 0.028f, 0.26f,  2.0f, 0.2f, 0.4f,  0, 0, 1,  0, 0, 1,  0.05f, 1500, 0.8f, 0.01f, 0.0005f, 0.4f, 0.55f, 1.1f,  1.0f, 0.6f, 1 },
+                { 0.45f, 0.4f, 0.02f, 0.07f,  1.6f, 0.3f, 0.6f,  0, 0, 1,  0, 0, 1,  0.9f, 1900, 0.65f, 0.17f, 0.0008f, 0.25f, 0.5f, 1.0f,  1.0f, 0.55f, 1 },
+                { 0.6f, 0.05f, 0.005f, 0.04f, 2.6f, 0.4f, 0.5f,  0, 0, 1,  0, 0, 1,  0.25f, 2500, 1.2f, 0.015f, 0.0003f, 0.3f, 0.35f, 1.0f,  1.0f, 2.0f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.04f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.6f, 7200, 0.7f, 0.05f, 0.001f, 0.05f, 0.3f, 1.0f,  1.0f, 3.0f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.05f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.55f, 5200, 1.1f, 0.06f, 0.012f, 0.0f, 0.2f, 1.0f,  1.0f, 1.8f, 1 } },
+            {   // GLASS: everything rings
+                { 0.8f, 0.0f, 0.01f, 1.4f,    2.76f, 0.35f, 0.4f, 5.4f, 0.15f, 0.2f,  1.41f, 0.9f, 0.4f,  0.0f, 900, 1, 0.01f, 0.001f, 0.0f, 0.0f, 0.9f,  1.0f, 0.5f, 1 },
+                { 0.6f, 0.0f, 0.01f, 0.5f,    2.0f, 0.3f, 0.5f, 3.0f, 0.12f, 0.3f,  3.5f, 0.6f, 0.08f,  0.0f, 900, 1, 0.01f, 0.001f, 0.05f, 0.0f, 0.9f,  1.5f, 0.6f, 1 },
+                { 0.5f, 0.0f, 0.01f, 0.9f,    2.0f, 0.25f, 0.6f, 4.0f, 0.1f, 0.3f,  1.0f, 0.4f, 0.2f,  0.0f, 900, 1, 0.01f, 0.001f, 0.0f, 0.0f, 0.9f,  2.0f, 0.5f, 1 },
+                { 0.2f, 0.0f, 0.01f, 0.3f,    1.5f, 0.5f, 1.0f, 2.25f, 0.4f, 1.0f,  7.1f, 2.0f, 0.1f,  0.3f, 8000, 2.0f, 0.3f, 0.06f, 0.0f, 0.0f, 0.9f,  1.0f, 1.8f, 1 },
+                { 0.35f, 0.0f, 0.01f, 0.25f,  2.0f, 0.3f, 0.6f, 0, 0, 1,  4.0f, 1.0f, 0.03f,  0.0f, 900, 1, 0.01f, 0.001f, 0.0f, 0.0f, 0.9f,  1.5f, 1.5f, 1 } },
+            {   // HANDS: djembe bass and tone, tabla, shaker, clap
+                { 0.9f, 0.5f, 0.03f, 0.2f,    1.5f, 0.25f, 0.5f,  0, 0, 1,  0, 0, 1,  0.2f, 700, 1.0f, 0.02f, 0.0005f, 0.15f, 0.2f, 1.0f,  1.0f, 0.6f, 1 },
+                { 0.7f, 0.15f, 0.02f, 0.12f,  1.59f, 0.4f, 0.5f, 2.14f, 0.2f, 0.3f, 0, 0, 1,  0.45f, 2200, 1.0f, 0.02f, 0.0004f, 0.15f, 0.15f, 1.0f,  1.0f, 0.4f, 1 },
+                { 0.6f, -0.12f, 0.12f, 0.3f,  2.0f, 0.35f, 0.5f, 3.0f, 0.15f, 0.3f,  0, 0, 1,  0.1f, 3000, 1.5f, 0.008f, 0.0003f, 0.1f, 0.05f, 1.0f,  1.5f, 0.3f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.05f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.55f, 6000, 1.3f, 0.07f, 0.015f, 0.0f, 0.1f, 1.0f,  1.0f, 1.6f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.05f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.9f, 1400, 0.9f, 0.09f, 0.0005f, 0.0f, 0.2f, 1.1f,  1.0f, 0.5f, 3 } },
+            {   // GLITCH: blips, crushed noise, zaps and static
+                { 1.0f, 6.0f, 0.012f, 0.18f,  1, 0, 1, 0, 0, 1,  0, 0, 1,  0.0f, 900, 1, 0.01f, 0.001f, 0.2f, 0.6f, 1.0f,  1.0f, 0.4f, 1 },
+                { 0.3f, 3.0f, 0.004f, 0.05f,  1, 0, 1, 0, 0, 1,  2.5f, 3.0f, 0.02f,  0.8f, 3000, 0.6f, 0.06f, 0.0002f, 0.4f, 0.7f, 1.0f,  0.5f, 1.5f, 1 },
+                { 0.6f, -0.8f, 0.03f, 0.08f,  1, 0, 1, 0, 0, 1,  1.5f, 4.0f, 0.04f,  0.0f, 900, 1, 0.01f, 0.001f, 0.1f, 0.3f, 0.9f,  2.0f, 0.5f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.03f,   1, 0, 1, 0, 0, 1,  0, 0, 1,  0.6f, 4000, 3.0f, 0.02f, 0.0002f, 0.3f, 0.5f, 1.1f,  1.0f, 3.0f, 4 },
+                { 0.4f, 0.0f, 0.01f, 0.02f,   1, 0, 1, 0, 0, 1,  1.0f, 2.5f, 0.01f,  0.0f, 900, 1, 0.01f, 0.001f, 0.0f, 0.4f, 1.0f,  2.0f, 2.0f, 1 } },
+            {   // IDM: a tight kick, a bright snare, a zap, a needle hat, a blip
+                { 1.0f, 3.5f, 0.015f, 0.16f,  2.0f, 0.15f, 0.3f,  0, 0, 1,  0, 0, 1,  0.1f, 4000, 0.7f, 0.004f, 0.0001f, 0.5f, 0.6f, 1.05f,  1.3f, 0.6f, 1 },
+                { 0.5f, 1.0f, 0.01f, 0.06f,   1.7f, 0.4f, 0.6f,  0, 0, 1,  0, 0, 1,  0.9f, 4200, 0.8f, 0.09f, 0.0003f, 0.35f, 0.55f, 1.0f,  1.5f, 0.5f, 1 },
+                { 0.7f, 8.0f, 0.006f, 0.05f,  1, 0, 1, 0, 0, 1,  2.01f, 3.0f, 0.01f,  0.0f, 900, 1, 0.01f, 0.001f, 0.2f, 0.5f, 0.9f,  0.5f, 1.5f, 1 },
+                { 0.0f, 0.0f, 0.01f, 0.012f,  1, 0, 1, 0, 0, 1,  0, 0, 1,  0.65f, 10000, 1.2f, 0.012f, 0.0001f, 0.1f, 0.3f, 1.1f,  1.0f, 4.0f, 1 },
+                { 0.5f, 0.0f, 0.01f, 0.03f,   1, 0, 1, 0, 0, 1,  3.0f, 1.5f, 0.005f,  0.0f, 900, 1, 0.01f, 0.001f, 0.0f, 0.2f, 0.9f,  2.0f, 1.0f, 1 } } };
+        return defs[clampKit (kit)][lane < 0 ? 0 : (lane >= Lanes ? Lanes - 1 : lane)];
+    }
+    static int clampKit (int k) { return k < 0 ? 0 : (k >= NumKits ? NumKits - 1 : k); }
+    static const char* laneName (int kit, int lane)
+    {
+        static const char* names[NumKits][Lanes] {
+            { "THUMP", "SKIN", "WOOD", "BRUSH", "TICK" }, { "BOOM", "SNARE", "RIM", "HAT", "BELL" },
+            { "KICK", "SNARE", "RIM", "HAT", "SHAKER" }, { "GONG", "GLASS", "CHIME", "SHIMMER", "SPARK" },
+            { "BASS", "TONE", "TABLA", "SHAKER", "CLAP" }, { "DROP", "CRUSH", "ZAP", "STATIC", "BLIP" },
+            { "KICK", "SNARE", "ZAP", "NEEDLE", "BLIP" } };
+        return names[clampKit (kit)][lane < 0 ? 0 : (lane >= Lanes ? Lanes - 1 : lane)];
+    }
+
     struct Hit { int lane = 0; float vel = 0.0f, freq = 100.0f, pan = 0.0f; int wait = 0, variant = 0; };
     struct Drum
     {
         bool on = false;
-        int variant = 0;
-        float t = 0.0f, vel = 0.0f, f = 100.0f, pan = 0.0f;
-        double ph = 0.0, ph2 = 0.0, ph3 = 0.0;
-        Svf bp, bp2;
+        int variant = 0, kit = 0;
+        float t = 0.0f, vel = 0.0f, f = 100.0f, pan = 0.0f, tauMul = 1.0f, noiseMul = 1.0f, life = 1.0f;
+        double ph = 0.0, ph2 = 0.0, ph3 = 0.0, mph = 0.0;
+        Svf bp;
     };
-    static constexpr int QN = 48;
+    static constexpr int QN = 160;
     Hit queue[QN];
     int qn = 0;
     Drum d[Lanes];
@@ -182,6 +407,11 @@ struct Pulse
     int coefCounter = 0;
     int hits = 0;                     // hits played so far (the editor flashes the lanes)
     int laneHits[Lanes] {};
+    // Set by the processor each block
+    int kit = 0;
+    float punch = 0.3f;
+    float laneLevel[Lanes] { 1, 1, 1, 1, 1 }, lanePitch[Lanes] {}, laneDecay[Lanes] { 1, 1, 1, 1, 1 };
+    float crushL = 0.0f, crushR = 0.0f, crushPh = 0.0f;
 
     void prepare (float sampleRate) { sr = sampleRate; qn = 0; for (auto& x : d) x.on = false; }
     bool busy() const { if (qn > 0) return true; for (auto& x : d) if (x.on) return true; return false; }
@@ -195,14 +425,17 @@ struct Pulse
     void start (const Hit& h)
     {
         auto& x = d[h.lane];
-        x.on = true; x.t = 0.0f; x.vel = h.vel; x.f = h.freq; x.pan = h.pan; x.variant = h.variant;
-        x.ph = x.ph2 = x.ph3 = 0.0;
-        if (h.lane == Brush)
-        {
-            x.bp.set (clampf (h.freq, 2500.0f, 12000.0f), 0.9f, sr);
-            x.bp2.set (clampf (h.freq * 0.55f, 1500.0f, 8000.0f), 1.4f, sr);
-        }
-        if (h.lane == Skin) x.bp.set (h.variant == 1 ? 2100.0f : 900.0f, 1.2f, sr);
+        const auto& v = def (kit, h.lane);
+        x.on = true; x.t = 0.0f; x.vel = h.vel * laneLevel[h.lane]; x.pan = h.pan; x.variant = h.variant; x.kit = kit;
+        const float pitch = std::exp2 (lanePitch[h.lane] / 12.0f);
+        x.f = h.freq * pitch * (h.variant == 1 ? v.altPitch : 1.0f);
+        x.tauMul = laneDecay[h.lane] * (h.variant == 1 ? v.altTau : 1.0f);
+        x.noiseMul = 1.0f;
+        x.ph = x.ph2 = x.ph3 = x.mph = 0.0;
+        if (v.noise > 0.0f) x.bp.set (clampf (v.nf * pitch * (h.lane == Brush ? h.freq / 6200.0f : 1.0f), 200.0f, 15000.0f), v.nq, sr);
+        // how long it can ring before it is silent
+        x.life = std::max (v.tau * x.tauMul * std::max (1.0f, std::max (v.k2, v.k3)), v.ntau * x.tauMul + v.natk) * 9.0f + 0.02f;
+        if (h.variant == 2) x.life = std::max (x.life, 0.3f);
         ++hits; ++laneHits[h.lane];
     }
 
@@ -225,87 +458,72 @@ struct Pulse
         {
             auto& x = d[lane];
             if (! x.on) continue;
+            const auto& v = def (x.kit, lane);
             x.t += dt;
             const float t = x.t;
+            if (t > x.life) { x.on = false; continue; }
+            const float tau = v.tau * x.tauMul;
             float y = 0.0f;
-            switch (lane)
+            if (v.tone > 0.0f)
             {
-                case Thump:
+                const float f = x.f * (1.0f + v.bend * std::exp (-t / v.bendT));
+                x.ph += f / sr; if (x.ph >= 1.0) x.ph -= 1.0;
+                float phase = kTwoPi * (float) x.ph;
+                if (v.fmI > 0.0f)
                 {
-                    // A soft low heartbeat: a sine that sinks into its note.
-                    const float f = x.f * (1.0f + 1.4f * std::exp (-t / 0.022f));
-                    x.ph += f / sr; if (x.ph >= 1.0) x.ph -= 1.0;
-                    const float atk = std::min (1.0f, t / 0.004f);
-                    const float tau = x.variant == 1 ? 0.14f : 0.24f;
-                    y = std::sin (kTwoPi * (float) x.ph) * atk * std::exp (-t / tau) * 0.95f;
-                    if (t > tau * 9.0f) x.on = false;
-                    break;
+                    x.mph += f * v.fmR / sr; if (x.mph >= 1.0) x.mph -= 1.0;
+                    phase += v.fmI * std::exp (-t / v.fmT) * std::sin (kTwoPi * (float) x.mph);
                 }
-                case Skin:
-                {
-                    // A hand drum: a low "doum" or a higher "tek", with a little slap of noise.
-                    const bool tek = x.variant == 1;
-                    const float f = x.f * (tek ? 2.1f : 1.0f) * (1.0f + 0.22f * std::exp (-t / 0.035f));
-                    x.ph += f / sr; if (x.ph >= 1.0) x.ph -= 1.0;
-                    x.ph2 += f * 1.59f / sr; if (x.ph2 >= 1.0) x.ph2 -= 1.0;
-                    const float tau = tek ? 0.06f : 0.17f;
-                    const float atk = std::min (1.0f, t / 0.0015f);
-                    float lp;
-                    const float slap = x.bp.process (rng.next(), lp) * std::exp (-t / 0.012f) * (tek ? 0.5f : 0.3f);
-                    y = (std::sin (kTwoPi * (float) x.ph) * std::exp (-t / tau)
-                         + 0.3f * std::sin (kTwoPi * (float) x.ph2) * std::exp (-t / (tau * 0.45f))) * atk * 0.7f + slap;
-                    if (t > tau * 9.0f) x.on = false;
-                    break;
-                }
-                case Wood:
-                {
-                    // A tuned wood block: three decaying modes.
-                    x.ph += x.f / sr; if (x.ph >= 1.0) x.ph -= 1.0;
-                    x.ph2 += x.f * 2.76f / sr; if (x.ph2 >= 1.0) x.ph2 -= 1.0;
-                    x.ph3 += x.f * 5.4f / sr; if (x.ph3 >= 1.0) x.ph3 -= 1.0;
-                    const float atk = std::min (1.0f, t / 0.0006f);
-                    const float tau = x.variant == 1 ? 0.16f : 0.075f;
-                    y = (std::sin (kTwoPi * (float) x.ph) * std::exp (-t / tau)
-                         + 0.45f * std::sin (kTwoPi * (float) x.ph2) * std::exp (-t / (tau * 0.33f))
-                         + 0.15f * std::sin (kTwoPi * (float) x.ph3) * std::exp (-t / (tau * 0.16f))) * atk * 0.6f;
-                    if (t > tau * 9.0f) x.on = false;
-                    break;
-                }
-                case Brush:
-                {
-                    // Brushed noise; variant 1 is a slow swish, variant 2 a reversed swell.
-                    float env;
-                    if (x.variant == 2) { const float rise = 0.16f; env = t < rise ? (t / rise) * (t / rise) * (t / rise) : std::exp (-(t - rise) / 0.012f); if (t > rise + 0.1f) x.on = false; }
-                    else
-                    {
-                        const float atk = x.variant == 1 ? 0.035f : 0.0025f, tau = x.variant == 1 ? 0.11f : 0.045f;
-                        env = t < atk ? t / atk : std::exp (-(t - atk) / tau);
-                        if (t > atk + tau * 9.0f) x.on = false;
-                    }
-                    float lp;
-                    const float n = rng.next();
-                    y = (x.bp.process (n, lp) * 0.9f + x.bp2.process (n, lp) * 0.35f) * env * 0.55f;
-                    break;
-                }
-                default:
-                {
-                    // A tiny bell tick.
-                    x.ph += x.f / sr; if (x.ph >= 1.0) x.ph -= 1.0;
-                    x.ph2 += x.f * 3.01f / sr; if (x.ph2 >= 1.0) x.ph2 -= 1.0;
-                    const float atk = std::min (1.0f, t / 0.0008f);
-                    const float tau = x.variant == 1 ? 0.09f : 0.028f;
-                    y = std::sin (kTwoPi * (float) x.ph + 1.3f * std::exp (-t / 0.008f) * std::sin (kTwoPi * (float) x.ph2))
-                        * atk * std::exp (-t / tau) * 0.4f;
-                    if (t > tau * 9.0f) x.on = false;
-                    break;
-                }
+                float tn = std::sin (phase) * std::exp (-t / tau);
+                if (v.a2 > 0.0f) { x.ph2 += f * v.r2 / sr; if (x.ph2 >= 1.0) x.ph2 -= 1.0; tn += v.a2 * std::sin (kTwoPi * (float) x.ph2) * std::exp (-t / (tau * v.k2)); }
+                if (v.a3 > 0.0f) { x.ph3 += f * v.r3 / sr; if (x.ph3 >= 1.0) x.ph3 -= 1.0; tn += v.a3 * std::sin (kTwoPi * (float) x.ph3) * std::exp (-t / (tau * v.k3)); }
+                y += tn * v.tone * std::min (1.0f, t / 0.0012f);
             }
-            y *= x.vel;
+            if (v.noise > 0.0f)
+            {
+                float env;
+                const float ntau = v.ntau * x.tauMul;
+                if (x.variant == 2)   // a reversed swell
+                {
+                    const float rise = 0.16f;
+                    env = t < rise ? (t / rise) * (t / rise) * (t / rise) : std::exp (-(t - rise) / 0.012f);
+                }
+                else if (v.bursts > 1 && t < 0.011f * (float) v.bursts)   // a clap: a few quick bursts
+                    env = std::exp (-std::fmod (t, 0.011f) / 0.0035f);
+                else
+                {
+                    const float t0 = v.bursts > 1 ? t - 0.011f * (float) v.bursts : t;
+                    env = (v.natk > 0.0f ? std::min (1.0f, t / v.natk) : 1.0f) * std::exp (-std::max (0.0f, t0) / ntau);
+                }
+                float lp;
+                y += x.bp.process (rng.next(), lp) / std::max (0.3f, v.nq) * 1.6f * env * v.noise;
+            }
+            if (v.click > 0.0f && t < 0.002f) y += v.click * (1.0f - t / 0.002f) * (rng.next() * 0.5f + 0.7f);
+            const float drive = v.drive + punch * 0.8f;
+            if (drive > 0.0f) y = softClip (y * (1.0f + 3.0f * drive)) / (1.0f + 1.4f * drive);
+            y *= x.vel * v.gain;
             ol += y * std::sqrt (0.5f * (1.0f - x.pan));
             orr += y * std::sqrt (0.5f * (1.0f + x.pan));
         }
-        l += toneL.lowpass (ol) * 0.5f;
-        r += toneR.lowpass (orr) * 0.5f;
+        // DUSTY and GLITCH are crushed a little: fewer samples, fewer bits
+        if (kit == 2 || kit == 5)
+        {
+            crushPh += (kit == 2 ? 14000.0f : 7000.0f) / sr;
+            if (crushPh >= 1.0f)
+            {
+                crushPh -= 1.0f;
+                const float q = kit == 2 ? 512.0f : 48.0f;
+                crushL = std::round (ol * q) / q; crushR = std::round (orr * q) / q;
+            }
+            ol = ol * 0.35f + crushL * 0.65f; orr = orr * 0.35f + crushR * 0.65f;
+        }
+        // The kits are balanced so that switching kit keeps the level about the same.
+        static const float kitGain[NumKits] { 1.0f, 1.25f, 1.4f, 0.55f, 1.15f, 1.9f, 1.5f };
+        ol *= kitGain[clampKit (kit)]; orr *= kitGain[clampKit (kit)];
+        // PUNCH: the whole kit pushed into a soft clipper, so it comes forward without spiking
+        const float pg = 1.0f + 2.5f * punch;
+        l += softClip (toneL.lowpass (ol) * pg) * (1.0f + 0.5f * punch) / pg;
+        r += softClip (toneR.lowpass (orr) * pg) * (1.0f + 0.5f * punch) / pg;
     }
 };
 

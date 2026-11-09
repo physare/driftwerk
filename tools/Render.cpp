@@ -45,12 +45,59 @@ int main (int argc, char** argv)
                 rp->setValueNotifyingHost (rp->convertTo0to1 (item.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
         proc.syncGrainSource();   // no message loop runs here, so pick up grain.src directly
     }
+    if (auto* env = std::getenv ("DW_DREAM"))   // DREAM: load a file for MY SOUND
+    {
+        const bool ok = proc.loadDreamSound (juce::File (env));
+        std::printf ("dream sound: %s\n", ok ? juce::File (env).getFileName().toRawUTF8() : "failed to load");
+    }
+    if (auto* env = std::getenv ("DW_WORDS"))   // WORDS: dump the synthetic voice, and/or load a file or folder of speech
+    {
+        if (const auto* b = proc.wordsBankNow())
+        {
+            std::printf ("words: %s, %d words, %d phrases, %.1f s\n", b->name.c_str(), (int) b->words.size(), (int) b->phrases.size(),
+                         (double) b->audio.size() / b->rate);
+            juce::WavAudioFormat wf;
+            juce::File f (outDir + "/words_synth.wav");
+            f.deleteFile();
+            if (auto os = f.createOutputStream())
+                if (auto* w = wf.createWriterFor (os.get(), b->rate, 1, 16, {}, 0))
+                {
+                    os.release();
+                    std::unique_ptr<juce::AudioFormatWriter> writer (w);
+                    juce::AudioBuffer<float> buf (1, (int) b->audio.size());
+                    for (int i = 0; i < buf.getNumSamples(); ++i) buf.setSample (0, i, b->audio[(size_t) i] / 32768.0f);
+                    writer->writeFromAudioSampleBuffer (buf, 0, buf.getNumSamples());
+                }
+        }
+        if (juce::String (env) != "1")
+        {
+            proc.loadWords (juce::StringArray::fromTokens (env, ";", ""));
+            for (int k = 0; k < 600 && proc.wordsLoading.load(); ++k) juce::Thread::sleep (50);
+            if (const auto* m = proc.myWords())
+                std::printf ("my words: %s, %d words, %d phrases, %.1f s\n", m->name.c_str(), (int) m->words.size(), (int) m->phrases.size(),
+                             (double) m->audio.size() / m->rate);
+            else std::printf ("my words: none (%s)\n", proc.wordsError.toRawUTF8());
+        }
+    }
     if (auto* env = std::getenv ("DW_ACT"))   // press buttons: copy (EDIT THESE), new (NEW CHORDS), hits (NEW)
     {
         const juce::String a (env);
         if (a.contains ("copy")) proc.copyProgressionToMine();
         if (a.contains ("new")) proc.randomiseMyChords();
         if (a.contains ("hits")) proc.newHits();
+        if (a.contains ("save"))   // MY PRESETS: save, change something, load it back
+        {
+            proc.setParam ("pulse.kit", 6.0f);
+            const bool ok = proc.saveUserPreset ("Render Test");
+            proc.setParam ("pulse.kit", 2.0f);
+            proc.loadPreset (3);
+            const auto files = DriftwerkProcessor::userPresets();
+            bool loaded = false;
+            for (auto& f : files) if (f.getFileNameWithoutExtension() == "Render Test") loaded = proc.loadUserPreset (f);
+            std::printf ("my presets: saved %d, %d files, loaded %d as \"%s\", kit %d (want 6)\n", (int) ok, files.size(), (int) loaded,
+                         proc.userPresetName.toRawUTF8(), (int) proc.apvts.getRawParameterValue ("pulse.kit")->load());
+            DriftwerkProcessor::userPresetFolder().getChildFile ("Render Test.timewind").deleteFile();
+        }
         std::printf ("after %s: mode %d, %d chords\n", env, (int) proc.apvts.getRawParameterValue ("prog.mode")->load(),
                      (int) proc.apvts.getRawParameterValue ("prog.len")->load() + 2);
     }
@@ -104,6 +151,7 @@ int main (int argc, char** argv)
     }
     rms = std::sqrt (rms / (2.0 * all.getNumSamples()));
     std::printf ("program %d peak %.3f rms %.4f\n", program, peak, rms);
+    std::printf ("words played %d\n", proc.wordsPlayed.load());
     std::printf ("slime notes %d (ear events %d)  pulse hits %d %d %d %d %d  texture events %d  memory %.1fs\n", proc.slimeNotes.load(),
                  proc.organism.totalHits.load(), proc.pulseLaneHits[0].load(), proc.pulseLaneHits[1].load(), proc.pulseLaneHits[2].load(),
                  proc.pulseLaneHits[3].load(), proc.pulseLaneHits[4].load(), proc.texEvents.load(), proc.memSeconds.load());

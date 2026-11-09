@@ -91,7 +91,8 @@ void SlimeLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w,
         const float now = s.getProperties()["modNow"];
         const float from = juce::jlimit (0.0f, 1.0f, depth >= 0 ? pos : pos + depth);
         const float to = juce::jlimit (0.0f, 1.0f, depth >= 0 ? pos + depth : pos);
-        const float rr = radius * 1.1f;
+        // Stays inside the knob's bounds (radius + 3), so the ring and its moving dot are never clipped.
+        const float rr = radius + 0.4f;
         juce::Path arc;
         arc.addCentredArc (c.x, c.y, rr, rr, 0.0f, start + from * (end - start), start + to * (end - start), true);
         g.setColour (fg.withAlpha (0.75f));
@@ -100,9 +101,9 @@ void SlimeLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w,
         {
             const float na = start + now * (end - start);
             g.setColour (acid.withAlpha (0.3f));
-            g.fillEllipse (c.x + rr * std::sin (na) - 6.0f, c.y - rr * std::cos (na) - 6.0f, 12.0f, 12.0f);
-            g.setColour (fg);
             g.fillEllipse (c.x + rr * std::sin (na) - 2.6f, c.y - rr * std::cos (na) - 2.6f, 5.2f, 5.2f);
+            g.setColour (fg);
+            g.fillEllipse (c.x + rr * std::sin (na) - 1.9f, c.y - rr * std::cos (na) - 1.9f, 3.8f, 3.8f);
         }
     }
 }
@@ -194,8 +195,10 @@ juce::Font SlimeLookAndFeel::getPopupMenuFont() { return dwui::font (14.0f); }
 void JackComponent::paint (juce::Graphics& g)
 {
     const auto r = getLocalBounds().toFloat();
-    const auto c = juce::Point<float> (r.getCentreX(), r.getBottom() - 11.0f);
-    if (isOutput) drawGlowDot (g, { c.x, r.getY() + 4.0f }, led, 2.2f);
+    // The bounds leave room for the hover halo (radius 12) below and the LED glow above,
+    // so neither circle is clipped at the component's edge.
+    const auto c = juce::Point<float> (r.getCentreX(), r.getBottom() - 14.0f);
+    if (isOutput) drawGlowDot (g, { c.x, c.y - 15.0f }, led, 2.2f);
 
     const auto ring = isOutput ? acid : fg2;
     if (hover)
@@ -761,6 +764,23 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     addAndMakeVisible (keyButton);
     keyAtt = std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "grain.key", keyButton);
 
+    // DREAM: the SOUND menu and LOAD sit under its knobs; drop a file on the module to load it.
+    {
+        const int t1 = rowTop (1);
+        dreamRect = { 1100, t1, 170, rowHeight (1) };
+        dreamSoundBox.addItemList (DriftwerkProcessor::dreamSoundNames(), 1);
+        dreamSoundBox.setBounds (1108, t1 + 250, 104, 22);
+        dreamSoundBox.setTooltip ("What the DREAM loops play: a built-in sound, or MY SOUND (a file you load, or drop on DREAM)");
+        addAndMakeVisible (dreamSoundBox);
+        dreamSoundAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, "dream.sound", dreamSoundBox);
+        dreamSoundBox.onChange = [this] { repaint (dreamNameArea); };
+        dreamLoadButton.setBounds (1216, t1 + 250, 46, 22);
+        dreamLoadButton.setTooltip ("Load your own sound for DREAM: every loop plays it at the chord's notes");
+        dreamLoadButton.onClick = [this] { chooseDreamSound(); };
+        addAndMakeVisible (dreamLoadButton);
+        dreamNameArea = { 1104, t1 + 276, 162, 14 };
+    }
+
     slimeRect = { 568, t0, 700, rowHeight (0) };
     slime = std::make_unique<SlimeView> (proc);
     slime->setBounds (slimeRect);
@@ -785,25 +805,20 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     addAndMakeVisible (*cameraView);
 
     // Header
-    {
-        juce::String group;
-        for (int i = 0; i < DriftwerkProcessor::getNumPresets(); ++i)
-        {
-            if (DriftwerkProcessor::getPresetGroup (i) != group)
-            {
-                group = DriftwerkProcessor::getPresetGroup (i);
-                presetBox.addSectionHeading (group);
-            }
-            presetBox.addItem (DriftwerkProcessor::getPresetName (i), i + 1);
-        }
-    }
-    presetBox.setSelectedId (proc.getCurrentPreset() + 1, juce::dontSendNotification);
+    rebuildPresetMenu();
     presetBox.onChange = [this]
     {
         const int id = presetBox.getSelectedId();
-        if (id > 0) { proc.loadPreset (id - 1); refreshPatch(); }
+        if (id > 1000)
+        {
+            if (const int k = id - 1001; k < userPresetFiles.size()) { proc.loadUserPreset (userPresetFiles[k]); refreshPatch(); }
+        }
+        else if (id > 0) { proc.loadPreset (id - 1); refreshPatch(); }
     };
     addAndMakeVisible (presetBox);
+    presetSaveButton.setTooltip ("Save this sound as one of your presets (they're listed under MY PRESETS)");
+    presetSaveButton.onClick = [this] { showPresetSaveMenu(); };
+    addAndMakeVisible (presetSaveButton);
     randomButton.onClick = [this] { proc.randomisePatch(); refreshPatch(); };
     clearButton.onClick = [this] { for (int i = 0; i < NumIns; ++i) proc.disconnect (i); refreshPatch(); };
     dimButton.setClickingTogglesState (true);
@@ -858,7 +873,7 @@ void MainView::buildModule (int specIndex)
     if (sp.module == M_ARP) { arpLedArea = { sp.x + 12, top + 40, sp.w - 24, 14 }; y0 += 20; }
 
     const int cellW = (sp.w - 12) / sp.cols;
-    const int cellH = sp.module == M_ARP ? 60 : 66;
+    const int cellH = sp.module == M_ARP || sp.module == M_CLOCK ? 60 : 66;
 
     for (int c = 0; c < (int) sp.controls.size(); ++c)
     {
@@ -916,7 +931,7 @@ void MainView::buildModule (int specIndex)
     auto place = [&] (int jackIdx, bool isOut, int x, int yy)
     {
         auto& jack = isOut ? *outJacks[(size_t) jackIdx] : *inJacks[(size_t) jackIdx];
-        jack.setBounds (x + (jackW - 30) / 2, yy + 14, 30, 30);
+        jack.setBounds (x + jackW / 2 - 17, yy + 11, 34, 36);
         labels.push_back ({ { x - 4, yy + 2, jackW + 8, 12 }, isOut ? outDefs[jackIdx].label : inDefs[jackIdx].label, true });
     };
 
@@ -1003,6 +1018,12 @@ void MainView::paint (juce::Graphics& g)
         g.setFont (dwui::font (l.jack ? 9.5f : 10.5f).withExtraKerningFactor (0.06f));
         g.drawText (l.text, l.r, juce::Justification::centred);
     }
+    if (! dreamNameArea.isEmpty())
+    {
+        g.setColour (fg2);
+        g.setFont (dwui::font (10.5f).withExtraKerningFactor (0.06f));
+        g.drawFittedText (dreamLabelText(), dreamNameArea, juce::Justification::centred, 1, 0.8f);
+    }
 
     // Hand Play: where your hand sits between the three worlds
     {
@@ -1047,7 +1068,11 @@ void MainView::paint (juce::Graphics& g)
         }
 }
 
-void MainView::showPerformTab (int t) { perform->setTab (t); }
+void MainView::showPerformTab (int t)
+{
+    if (t >= 100) { perform->setTab (t / 100); perform->setPulsePage (t % 100); }   // 601: the PULSE tab's SOUND page
+    else perform->setTab (t);
+}
 void MainView::setFullScreenLabel (bool isFull) { screenButton.setButtonText (isFull ? "EXIT FULL" : "FULL SCREEN"); }
 
 void MainView::openFullCamera (bool open)
@@ -1064,10 +1089,90 @@ void MainView::resized()
     filesButton.setBounds (getWidth() - 878, 14, 88, 26);
     screenButton.setBounds (getWidth() - 786, 14, 98, 26);
     fullButton.setBounds (getWidth() - 684, 14, 76, 26);
-    presetBox.setBounds (getWidth() - 600, 14, 200, 26);
+    presetBox.setBounds (getWidth() - 600, 14, 152, 26);
+    presetSaveButton.setBounds (getWidth() - 444, 14, 50, 26);
     randomButton.setBounds (getWidth() - 390, 14, 130, 26);
     clearButton.setBounds (getWidth() - 252, 14, 100, 26);
     dimButton.setBounds (getWidth() - 144, 14, 128, 26);
+}
+
+//==============================================================================
+// Presets: the built-in ones by group, then MY PRESETS (files in Timewind's presets folder).
+void MainView::rebuildPresetMenu()
+{
+    presetBox.clear (juce::dontSendNotification);
+    juce::String group;
+    for (int i = 0; i < DriftwerkProcessor::getNumPresets(); ++i)
+    {
+        if (DriftwerkProcessor::getPresetGroup (i) != group)
+        {
+            group = DriftwerkProcessor::getPresetGroup (i);
+            presetBox.addSectionHeading (group);
+        }
+        presetBox.addItem (DriftwerkProcessor::getPresetName (i), i + 1);
+    }
+    userPresetFiles = DriftwerkProcessor::userPresets();
+    presetBox.addSectionHeading ("MY PRESETS");
+    if (userPresetFiles.isEmpty()) presetBox.addItem ("(none yet: SAVE makes one)", 999), presetBox.setItemEnabled (999, false);
+    for (int k = 0; k < userPresetFiles.size(); ++k) presetBox.addItem (userPresetFiles[k].getFileNameWithoutExtension(), 1001 + k);
+    presetBox.setSelectedId (proc.getCurrentPreset() + 1, juce::dontSendNotification);
+}
+
+void MainView::showPresetSaveMenu()
+{
+    const auto mine = proc.userPresetName;
+    juce::PopupMenu m;
+    m.addItem (1, "Save as a new preset...");
+    if (mine.isNotEmpty())
+    {
+        m.addItem (2, "Save over \"" + mine + "\"");
+        m.addItem (3, "Delete \"" + mine + "\"");
+    }
+    m.addSeparator();
+    m.addItem (4, "Show the presets folder");
+    juce::Component::SafePointer<MainView> safe (this);
+    m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&presetSaveButton), [safe, mine] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        auto& self = *safe;
+        if (r == 1)
+            self.askPresetName (mine.isNotEmpty() ? mine + " 2" : DriftwerkProcessor::getPresetName (self.proc.getCurrentPreset()) + " (mine)");
+        else if (r == 2) { self.proc.saveUserPreset (mine); self.rebuildPresetMenu(); }
+        else if (r == 3)
+        {
+            juce::AlertWindow::showOkCancelBox (juce::MessageBoxIconType::QuestionIcon, "Delete preset",
+                                                "Delete your preset \"" + mine + "\"? It goes to the recycle bin.", "DELETE", "KEEP", nullptr,
+                juce::ModalCallbackFunction::create ([safe, mine] (int ok)
+                {
+                    if (safe == nullptr || ok == 0) return;
+                    DriftwerkProcessor::userPresetFolder().getChildFile (mine + ".timewind").moveToTrash();
+                    safe->proc.userPresetName.clear();
+                    safe->rebuildPresetMenu();
+                }));
+        }
+        else if (r == 4)
+        {
+            const auto folder = DriftwerkProcessor::userPresetFolder();
+            folder.createDirectory();
+            folder.startAsProcess();
+        }
+    });
+}
+
+void MainView::askPresetName (const juce::String& suggestion)
+{
+    auto* aw = new juce::AlertWindow ("Save preset", "Name your preset:", juce::MessageBoxIconType::NoIcon, this);
+    aw->addTextEditor ("name", suggestion);
+    aw->addButton ("SAVE", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    aw->addButton ("CANCEL", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+    juce::Component::SafePointer<MainView> safe (this);
+    aw->enterModalState (true, juce::ModalCallbackFunction::create ([safe, aw] (int r)
+    {
+        if (safe == nullptr || r == 0) return;
+        const auto name = aw->getTextEditorContents ("name").trim();
+        if (name.isEmpty()) return;
+        if (safe->proc.saveUserPreset (name)) safe->rebuildPresetMenu();
+    }), true);
 }
 
 //==============================================================================
@@ -1083,9 +1188,46 @@ void MainView::chooseSample()
         });
 }
 
-void MainView::filesDropped (const juce::StringArray& files, int, int)
+juce::String MainView::dreamLabelText() const
+{
+    if (dreamSoundBox.getSelectedId() - 1 != DriftwerkProcessor::dreamMySound) return "SOUND";
+    if (! proc.hasDreamSound()) return "NO FILE YET: LOAD ONE";
+    return juce::File (proc.dreamPath).getFileNameWithoutExtension().toUpperCase();
+}
+
+void MainView::chooseDreamSound()
+{
+    chooser = std::make_unique<juce::FileChooser> ("Load a sound for DREAM", juce::File(), "*.wav;*.aif;*.aiff;*.flac;*.ogg;*.mp3");
+    chooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles,
+        [this] (const juce::FileChooser& fc)
+        {
+            const auto f = fc.getResult();
+            if (f.existsAsFile() && proc.loadDreamSound (f)) useDreamSound();
+            repaint (dreamNameArea);
+        });
+}
+
+void MainView::useDreamSound()
+{
+    if (auto* ds = proc.apvts.getParameter ("dream.sound"))
+    {
+        ds->beginChangeGesture();
+        ds->setValueNotifyingHost (ds->convertTo0to1 ((float) DriftwerkProcessor::dreamMySound));
+        ds->endChangeGesture();
+    }
+    repaint (dreamNameArea);
+}
+
+void MainView::filesDropped (const juce::StringArray& files, int x, int y)
 {
     grainView->dragHover = false;
+    if (dreamRect.contains (x, y))
+    {   // Dropped on DREAM: it becomes MY SOUND there.
+        for (auto& path : files)
+            if (proc.loadDreamSound (juce::File (path))) { useDreamSound(); break; }
+        grainView->repaint();
+        return;
+    }
     for (auto& path : files)
         if (proc.loadSample (juce::File (path))) { useMyFile(); break; }
     grainView->repaint();
@@ -1152,7 +1294,7 @@ juce::Point<float> MainView::jackCentre (bool output, int idx) const
 {
     const auto& j = output ? *outJacks[(size_t) idx] : *inJacks[(size_t) idx];
     const auto b = j.getBounds().toFloat();
-    return { b.getCentreX(), b.getBottom() - 11.0f };
+    return { b.getCentreX(), b.getBottom() - 14.0f };
 }
 
 juce::Colour MainView::cableColour (int out, int in) const
@@ -1206,6 +1348,7 @@ void MainView::refreshPatch()
 void MainView::timerCallback()
 {
     perform->refresh();
+    if (const auto dn = dreamLabelText(); dn != shownDreamName) { shownDreamName = dn; repaint (dreamNameArea); }
     if (proc.isRecording())
     {
         const int secs = (int) proc.recordingSeconds();
@@ -1216,8 +1359,17 @@ void MainView::timerCallback()
         const auto ps = proc.getPatchString();
         if (ps != lastPatch) { lastPatch = ps; cables->repaint(); }
     }
-    if (presetBox.getSelectedId() != proc.getCurrentPreset() + 1)
-        presetBox.setSelectedId (proc.getCurrentPreset() + 1, juce::dontSendNotification);
+    {
+        int want = proc.getCurrentPreset() + 1;
+        if (proc.userPresetName.isNotEmpty())
+        {
+            want = 0;
+            for (int k = 0; k < userPresetFiles.size(); ++k)
+                if (userPresetFiles[k].getFileNameWithoutExtension() == proc.userPresetName) want = 1001 + k;
+        }
+        if (want == 0 && presetBox.getText() != proc.userPresetName) presetBox.setText (proc.userPresetName, juce::dontSendNotification);
+        else if (want != 0 && presetBox.getSelectedId() != want) presetBox.setSelectedId (want, juce::dontSendNotification);
+    }
 
     for (auto& sl : sliders)
     {
@@ -1258,13 +1410,13 @@ void MainView::timerCallback()
 //==============================================================================
 PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view (v)
 {
-    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "CHORDS", "HARMONY", "LOOPS", "PULSE", "TEXTURE", "MEMORY", "ORGANISM" };
+    const char* tabNames[] { "SEQUENCE", "ARP SOUND", "DRONE", "CHORDS", "HARMONY", "LOOPS", "PULSE", "TEXTURE", "MEMORY", "ORGANISM", "WORDS" };
     static_assert (sizeof (tabNames) / sizeof (tabNames[0]) == NumTabs);
     for (int t = 0; t < NumTabs; ++t)
     {
         tabButtons[t].setButtonText (tabNames[t]);
         tabButtons[t].getProperties().set ("small", true);
-        tabButtons[t].setBounds (10 + t * 68, 6, 64, 22);
+        tabButtons[t].setBounds (6 + t * 63, 6, 60, 22);
         tabButtons[t].onClick = [this, t] { setTab (t); };
         addAndMakeVisible (tabButtons[t]);
     }
@@ -1312,7 +1464,22 @@ PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view
         const std::pair<const char*, const char*> k[] { { "arp.oct", "OCTAVE" }, { "arp.glide", "GLIDE" }, { "env1.a", "SOFT" },
             { "env1.d", "PLUCK" }, { "vcf1.cut", "BRIGHT" }, { "vcf1.res", "RESO" }, { "vcf1.drive", "DRIVE" },
             { "vco2.fine", "DETUNE" }, { "echo.mix", "ECHO" }, { "out.lvl1", "LEVEL" } };
-        for (int i = 0; i < 10; ++i) knob (k[i].first, k[i].second, ArpSound, 30 + (i % 5) * 132, 62 + (i / 5) * 104);
+        for (int i = 0; i < 10; ++i)
+        {
+            const int kx = 346 + (i % 5) * 68, ky = 46 + (i / 5) * 104;
+            knob (k[i].first, k[i].second, ArpSound, kx, ky);
+            labs.back().r = { kx + 15, ky + 54, 64, 14 };
+        }
+        // WAVE: the arp's waveform, drawn in the box, with SHAPE, FOLD and MOVE under it
+        combo ("arp.wave", "WAVE", ArpSound, 16, 46, 110);
+        combo ("arp.table", "WAVETABLE", ArpSound, 16, 104, 110);
+        const std::pair<const char*, const char*> w[] { { "arp.shape", "SHAPE" }, { "arp.fold", "FOLD" }, { "arp.move", "MOVE" } };
+        for (int i = 0; i < 3; ++i)
+        {
+            const int kx = 124 + i * 70, ky = 166;
+            knob (w[i].first, w[i].second, ArpSound, kx, ky);
+            labs.back().r = { kx + 15, ky + 54, 64, 14 };
+        }
     }
     // ---- DRONE tab
     {
@@ -1382,19 +1549,96 @@ PerformPanel::PerformPanel (DriftwerkProcessor& p, MainView& v) : proc (p), view
             { "loop.tone", "TONE" }, { "loop.drift", "WOBBLE" }, { "loop.weird", "WEIRD" } };
         for (int i = 0; i < 10; ++i) knob (k[i].first, k[i].second, Loops, 256 + (i % 5) * 86, 96 + (i / 5) * 82);
     }
-    // ---- PULSE tab: settings on the left, the pattern (five lanes) on the right, knobs below
-    onOff (pulseOnButton, "pulse.on", Pulse, { 16, 46, 100, 24 });
-    combo ("pulse.style", "STYLE", Pulse, 16, 92, 100);
-    combo ("pulse.speed", "STEP", Pulse, 16, 142, 100);
-    pulseNewButton.setBounds (16, 198, 100, 24);
+    // ---- PULSE tab: settings on the left; two pages: the PATTERN (five lanes and the groove
+    // knobs) and the SOUND of each drum (level, pitch, decay) with the kit's punch and tone.
+    onOff (pulseOnButton, "pulse.on", Pulse, { 16, 40, 100, 24 });
+    combo ("pulse.style", "STYLE", Pulse, 16, 78, 100);
+    combo ("pulse.kit", "KIT", Pulse, 16, 128, 100);
+    combo ("pulse.speed", "STEP", Pulse, 16, 178, 100);
+    combo ("pulse.length", "LENGTH", Pulse, 16, 228, 100);
+    pulsePatternButton.setBounds (132, 40, 76, 22);
+    pulseSoundButton.setBounds (212, 40, 76, 22);
+    for (auto* b : { &pulsePatternButton, &pulseSoundButton })
+    {
+        b->getProperties().set ("small", true);
+        b->setClickingTogglesState (false);
+        addAndMakeVisible (*b);
+        tabbed.push_back ({ b, Pulse });
+    }
+    pulsePatternButton.onClick = [this] { setPulsePage (0); };
+    pulseSoundButton.onClick = [this] { setPulsePage (1); };
+    pulseNewButton.setBounds (612, 40, 76, 22);
     pulseNewButton.onClick = [this] { proc.pulseNewReq.fetch_add (1); proc.setParam ("pulse.on", 1.0f); };
     addAndMakeVisible (pulseNewButton);
     tabbed.push_back ({ &pulseNewButton, Pulse });
     {
         const std::pair<const char*, const char*> k[] { { "pulse.level", "LEVEL" }, { "pulse.density", "DENSITY" }, { "pulse.swing", "SWING" },
-            { "pulse.human", "HUMAN" }, { "pulse.tone", "TONE" }, { "pulse.space", "SPACE" }, { "pulse.vary", "VARY" }, { "pulse.weird", "WEIRD" } };
-        for (int i = 0; i < 8; ++i) knob (k[i].first, k[i].second, Pulse, 124 + i * 70, 172);
+            { "pulse.human", "HUMAN" }, { "pulse.vary", "VARY" }, { "pulse.fill", "FILL" }, { "pulse.stutter", "STUTTER" },
+            { "pulse.chop", "CHOP" }, { "pulse.space", "SPACE" }, { "pulse.weird", "WEIRD" } };
+        for (int i = 0; i < 10; ++i)
+        {
+            knob (k[i].first, k[i].second, PulsePatternPage, 108 + i * 56, 180);
+            labs.back().r = { 108 + i * 56 + 15, 234, 64, 14 };
+        }
+        // SOUND: a column for each drum (LEVEL, PITCH, DECAY), the whole kit on the right
+        for (int lane = 0; lane < dw::Pulse::Lanes; ++lane)
+            for (int row = 0; row < 3; ++row)
+            {
+                const juce::String id = juce::String ("pulse.") + "lpd"[row] + juce::String (lane + 1);
+                knob (id.toRawUTF8(), "", PulseSoundPage, 0, 0);
+                labs.pop_back();
+                owned.back()->setBounds (soundCol (lane) - 22, soundRowY[row], 44, 44);
+            }
+        const std::pair<const char*, const char*> kk[] { { "pulse.level", "LEVEL" }, { "pulse.punch", "PUNCH" }, { "pulse.tone", "TONE" } };
+        for (int row = 0; row < 3; ++row)
+        {
+            knob (kk[row].first, kk[row].second, PulseSoundPage, 0, 0);
+            owned.back()->setBounds (632, soundRowY[row], 44, 44);
+            labs.back().r = { 566, soundRowY[row] + 15, 60, 14 };
+        }
     }
+    setPulsePage (0);
+    // ---- WORDS tab: your recordings (or the synthetic voice), half heard
+    onOff (wordsOnButton, "words.on", Words, { 16, 40, 110, 24 });
+    combo ("words.src", "SOURCE", Words, 16, 80, 110);
+    wordsLoadButton.setBounds (16, 134, 110, 24);
+    wordsLoadButton.onClick = [this]
+    {
+        wordsChooser = std::make_unique<juce::FileChooser> ("Load spoken words (pick one or more recordings)", juce::File(),
+                                                            "*.wav;*.aif;*.aiff;*.flac;*.mp3;*.ogg");
+        juce::Component::SafePointer<PerformPanel> safe (this);
+        wordsChooser->launchAsync (juce::FileBrowserComponent::openMode | juce::FileBrowserComponent::canSelectFiles
+                                       | juce::FileBrowserComponent::canSelectMultipleItems,
+                                   [safe] (const juce::FileChooser& fc)
+                                   {
+                                       if (safe == nullptr) return;
+                                       juce::StringArray paths;
+                                       for (const auto& f : fc.getResults()) paths.add (f.getFullPathName());
+                                       if (paths.isEmpty()) return;
+                                       safe->proc.loadWords (paths);
+                                       safe->proc.setParam ("words.src", 0.0f);
+                                       safe->proc.setParam ("words.on", 1.0f);
+                                   });
+    };
+    addAndMakeVisible (wordsLoadButton);
+    tabbed.push_back ({ &wordsLoadButton, Words });
+    wordsBeatButton.setBounds (16, 168, 110, 24);
+    wordsBeatButton.setClickingTogglesState (true);
+    addAndMakeVisible (wordsBeatButton);
+    bAtt.push_back (std::make_unique<juce::AudioProcessorValueTreeState::ButtonAttachment> (proc.apvts, "words.beat", wordsBeatButton));
+    tabbed.push_back ({ &wordsBeatButton, Words });
+    {
+        const std::pair<const char*, const char*> k[] { { "words.level", "LEVEL" }, { "words.often", "OFTEN" }, { "words.phrases", "PHRASES" },
+            { "words.speed", "SPEED" }, { "words.wobble", "WOBBLE" }, { "words.radio", "RADIO" }, { "words.reverse", "REVERSE" },
+            { "words.repeat", "REPEAT" }, { "words.space", "SPACE" } };
+        for (int i = 0; i < 9; ++i)
+        {
+            const int kx = 124 + i * 61, ky = 160;
+            knob (k[i].first, k[i].second, Words, kx, ky);
+            labs.back().r = { kx + 15, ky + 54, 64, 14 };
+        }
+    }
+
     // ---- TEXTURE tab
     onOff (texOnButton, "tex.on", Texture, { 16, 46, 100, 24 });
     combo ("tex.a", "TEXTURE A", Texture, 16, 92, 100);
@@ -1472,8 +1716,16 @@ void PerformPanel::setTab (int t)
 {
     tab = t;
     for (int i = 0; i < NumTabs; ++i) tabButtons[i].setToggleState (i == t, juce::dontSendNotification);
-    for (auto& [c, ct] : tabbed) c->setVisible (ct == t);
+    for (auto& [c, ct] : tabbed) c->setVisible (shows (ct));
     repaint();
+}
+
+void PerformPanel::setPulsePage (int pg)
+{
+    pulsePage = juce::jlimit (0, 1, pg);
+    pulsePatternButton.setToggleState (pulsePage == 0, juce::dontSendNotification);
+    pulseSoundButton.setToggleState (pulsePage == 1, juce::dontSendNotification);
+    setTab (tab);
 }
 
 void PerformPanel::refresh()
@@ -1487,6 +1739,7 @@ void PerformPanel::refresh()
     if (tab == Harmony) animateWheel();
     animate();
     if (tab != ArpSound && tab != Drone) repaint();
+    else if (tab == ArpSound) repaint (waveBox().expanded (4));
 }
 
 int PerformPanel::colAt (int x) const
@@ -1513,7 +1766,7 @@ void PerformPanel::mouseDown (const juce::MouseEvent& e)
     dragCol = -1;
     hitPaintCol = -1;
     pulsePaintLane = -1;
-    if (tab == Pulse && pulseGrid().contains (e.getPosition()))
+    if (tab == Pulse && pulsePage == 0 && pulseGrid().contains (e.getPosition()))
     {
         // Click a step to force it on or off; drag along the lane to paint more.
         const auto gr = pulseGrid();
@@ -1605,22 +1858,29 @@ void PerformPanel::paint (juce::Graphics& g)
     g.drawRect (getLocalBounds(), 1);
 
     const char* subs[] { "HOLD keeps the pattern. Click a step on/off, drag to set its note, REC NOTES to play it in.",
-                         "shapes the arp voice: VCO > VCF 1 > VCA 1 (in most presets)",
+                         "WAVE picks the arp's waveform (PATCH plays the VCO jacks as patched). SHAPE bends it, FOLD folds it, MOVE lets it breathe.",
                          "TYPE: saws, organ, strings, glass or choir. COLOUR shapes each type (brightness, drawbars, width, shimmer, vowel).",
                          "plays the HARMONY chord, in tune with everything. STEPS plays the HITS pattern: DENSITY fills it, NEW reshuffles, VARY changes it each loop.",
                          "circle of fifths in your key: lit notes are the chord now, the arrow points to the next one. Click a chord on the right to change it.",
                          "loops of different lengths drift in and out of phase, each ringing a note of the chord. WEIRD reverses, bends and ghosts them.",
-                         "soft drums. DENSITY fills the pattern, NEW reshuffles it, click steps to force them. Style ORGANISM lets the slime drum.",
+                         "drums: pick a STYLE and a KIT. DENSITY fills the pattern, NEW reshuffles, click steps to force them. SOUND shapes each drum.",
                          "weather and creatures, made from nothing. IN KEY tunes drops, bubbles, whistles and birds to the chord.",
-                         "Timewind drifts back into what it played: slower, reversed, blurred. DISSOLVE lets memories fade into memories." };
+                         "Timewind drifts back into what it played: slower, reversed, blurred. DISSOLVE lets memories fade into memories.",
+                         "",
+                         "LOAD WORDS: any speech recordings. Timewind cuts them into words and phrases and lets them drift in, like an old tape." };
+    static_assert (sizeof (subs) / sizeof (subs[0]) == NumTabs);
     g.setColour (fg3);
     g.setFont (dwui::font (10.5f));
     g.drawFittedText (subs[tab], 14, getHeight() - 22, getWidth() - 28, 14, juce::Justification::left, 1, 0.8f);
 
     g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
     for (auto& l : labs)
-        if (l.tab == tab) { g.setColour (fg2); g.drawText (l.t, l.r, juce::Justification::centred); }
+        if (shows (l.tab)) { g.setColour (fg2); g.drawText (l.t, l.r, juce::Justification::centred); }
 
+    if (tab == ArpSound)
+        paintWave (g);
+    if (tab == Words)
+        paintWords (g);
     if (tab == Sequence)
     {
         const auto gr = grid();
@@ -1752,26 +2012,160 @@ void PerformPanel::paintLoops (juce::Graphics& g)
                 256, 250, 430, 14, juce::Justification::left);
 }
 
+void PerformPanel::paintWords (juce::Graphics& g)
+{
+    using namespace dwui;
+    const bool on = proc.apvts.getRawParameterValue ("words.on")->load() > 0.5f;
+    const auto box = wordsBox().toFloat();
+    g.setColour (juce::Colours::white.withAlpha (0.04f));
+    g.fillRect (box);
+    const auto* bank = proc.wordsNowBank.load();
+    const int w = proc.wordsNowWord.load();
+    if (w >= 0 && bank != nullptr) { wordsShown = w; wordsShownBank = bank; wordsGlow = 1.0f; }
+    else wordsGlow *= 0.94f;
+    // what it is speaking from
+    g.setFont (dwui::font (10.0f));
+    g.setColour (fg3);
+    juce::String info;
+    const auto* mine = proc.myWords();
+    if (proc.wordsLoading.load()) info = "listening for words in your recordings...";
+    else if (bank != nullptr)
+        info = juce::String (bank->name) + ": " + juce::String ((int) bank->words.size()) + " words, "
+             + juce::String ((int) bank->phrases.size()) + " phrases";
+    else info = mine != nullptr ? juce::String (mine->name) : juce::String ("the synthetic voice");
+    const auto err = proc.wordsErrorText();
+    if (err.isNotEmpty() && ! proc.wordsLoading.load()) info << "  (" << err << ")";
+    if (mine == nullptr && ! proc.wordsLoading.load()) info << ". LOAD WORDS to give it real voices";
+    g.drawFittedText (info, box.reduced (8.0f, 4.0f).removeFromTop (14.0f).toNearestInt(), juce::Justification::left, 1, 0.8f);
+    // the word it is saying: its text (the synthetic voice) or its shape (your recordings)
+    const auto inner = box.reduced (10.0f, 22.0f);
+    if (wordsShownBank != nullptr && wordsShown >= 0 && wordsShown < (int) wordsShownBank->words.size() && wordsGlow > 0.02f)
+    {
+        const auto& sg = wordsShownBank->words[(size_t) wordsShown];
+        const auto col = acid.withAlpha (juce::jmin (1.0f, wordsGlow * (on ? 1.0f : 0.4f)));
+        const std::string& tx = wordsShownBank->text[(size_t) wordsShown];
+        if (! tx.empty())
+        {
+            g.setColour (col);
+            g.setFont (dwui::font (30.0f).withExtraKerningFactor (0.12f));
+            g.drawText (juce::String (tx), inner, juce::Justification::centred);
+        }
+        else
+        {
+            juce::Path pth;
+            const int n = (int) inner.getWidth();
+            const int len = juce::jmax (1, sg.end - sg.start);
+            for (int i = 0; i < n; ++i)
+            {
+                float pk = 0.0f;
+                const int a = sg.start + len * i / n, b = sg.start + len * (i + 1) / n;
+                for (int k = a; k < juce::jmax (a + 1, b); ++k) pk = juce::jmax (pk, std::abs ((float) wordsShownBank->audio[(size_t) k] / 32768.0f));
+                const float h = juce::jmin (1.0f, pk * 1.4f) * inner.getHeight() * 0.5f;
+                pth.addRectangle (inner.getX() + (float) i, inner.getCentreY() - h, 1.0f, h * 2.0f + 0.5f);
+            }
+            g.setColour (col);
+            g.fillPath (pth);
+        }
+    }
+    else
+    {
+        g.setColour (fg3.withAlpha (0.5f));
+        g.setFont (dwui::font (11.0f));
+        g.drawText (on ? "listening..." : "WORDS is off", inner, juce::Justification::centred);
+    }
+}
+
+void PerformPanel::paintWave (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
+    const int wave = (int) std::lround (pv ("arp.wave"));
+    const int bank = (int) std::lround (pv ("arp.table"));
+    const float fold = pv ("arp.fold");
+    const float shape = wave != 0 && pv ("arp.move") > 0.001f ? proc.arpShapeNow.load() : pv ("arp.shape");
+    const auto box = waveBox().toFloat();
+    g.setColour (juce::Colours::white.withAlpha (0.04f));
+    g.fillRect (box);
+    g.setColour (rule);
+    g.drawHorizontalLine ((int) box.getCentreY(), box.getX() + 4.0f, box.getRight() - 4.0f);
+    // two cycles of the wave
+    juce::Path pth;
+    const int n = (int) box.getWidth() - 12;
+    for (int i = 0; i <= n; ++i)
+    {
+        float ph = 2.0f * (float) i / (float) n;
+        ph -= std::floor (ph);
+        const float y = wave == 0 ? dw::WaveOsc::shapeAt (dw::WaveOsc::Saw, ph, 0.0f, 0.0f, 0)
+                                  : dw::WaveOsc::shapeAt (wave, ph, shape, fold, bank);
+        const float px = box.getX() + 6.0f + (float) i, py = box.getCentreY() - juce::jlimit (-1.1f, 1.1f, y) * (box.getHeight() * 0.38f);
+        if (i == 0) pth.startNewSubPath (px, py); else pth.lineTo (px, py);
+    }
+    g.setColour (wave == 0 ? fg3 : acid);
+    g.strokePath (pth, juce::PathStrokeType (wave == 0 ? 1.0f : 1.6f, juce::PathStrokeType::curved));
+    g.setFont (dwui::font (9.5f).withExtraKerningFactor (0.06f));
+    g.setColour (fg3);
+    const char* names[] { "PATCH: the VCO jacks as patched", "SINE", "TRIANGLE", "SAW", "SQUARE", "WAVETABLE" };
+    juce::String label = names[juce::jlimit (0, 5, wave)];
+    if (wave == 5) label << ": " << dw::Wavetables::bankName (bank);
+    g.drawText (label, box.reduced (6.0f, 3.0f), juce::Justification::topLeft);
+}
+
 void PerformPanel::paintPulse (juce::Graphics& g)
 {
     using namespace dwui;
     const auto pv = [this] (const char* id) { return proc.apvts.getRawParameterValue (id)->load(); };
     const bool on = pv ("pulse.on") > 0.5f;
     const int style = (int) std::lround (pv ("pulse.style"));
-    const auto gr = pulseGrid();
+    const int kit = dw::Pulse::clampKit ((int) std::lround (pv ("pulse.kit")));
+    const int lengthMode = (int) std::lround (pv ("pulse.length"));
     const int L = dw::Pulse::Lanes, N = dw::Pulse::Steps;
+    if (pulsePage == 1)
+    {
+        // SOUND: each drum's name flashes when it plays; rows are LEVEL, PITCH, DECAY
+        const char* rows[] { "LEVEL", "PITCH", "DECAY" };
+        const char* kits[] { "SOFT", "DEEP", "DUSTY", "GLASS", "HANDS", "GLITCH", "IDM" };
+        g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
+        for (int row = 0; row < 3; ++row)
+        {
+            g.setColour (fg3);
+            g.drawText (rows[row], 120, soundRowY[row] + 15, 42, 14, juce::Justification::centredRight);
+        }
+        for (int l = 0; l < L; ++l)
+        {
+            const int cx = soundCol (l);
+            g.setColour ((on ? fg : fg3).interpolatedWith (acid, laneFlash[l] * (on ? 0.9f : 0.0f)));
+            g.setFont (dwui::font (10.5f).withExtraKerningFactor (0.08f));
+            g.drawText (dw::Pulse::laneName (kit, l), cx - 36, 66, 72, 14, juce::Justification::centred);
+            g.setColour (acid.withAlpha (laneFlash[l] * (on ? 0.6f : 0.0f)));
+            g.fillRect ((float) cx - 14.0f, 80.0f, 28.0f, 1.5f);
+        }
+        g.setColour (rule);
+        g.drawVerticalLine (556, 70.0f, 230.0f);
+        g.setColour (fg3);
+        g.setFont (dwui::font (10.0f));
+        g.drawText (juce::String ("the ") + kits[kit] + " kit. PUNCH pushes it forward, TONE opens it up",
+                    120, 240, 568, 14, juce::Justification::right);
+        return;
+    }
+    const auto gr = pulseGrid();
     const float cw = (float) gr.getWidth() / (float) N, lh = (float) gr.getHeight() / (float) L;
-    const int cur = proc.pulseStepNow.load();
-    const char* laneNames[] { "THUMP", "SKIN", "WOOD", "BRUSH", "TICK" };
     for (int l = 0; l < L; ++l)
     {
         const float y = (float) gr.getY() + lh * (float) l;
+        const int len = DriftwerkProcessor::pulseLaneLength (lengthMode, l);
+        const int cur = proc.pulseLanePos[(size_t) l].load();
         g.setColour ((on ? fg2 : fg3).interpolatedWith (acid, laneFlash[l] * (on ? 0.9f : 0.0f)));
         g.setFont (dwui::font (9.5f).withExtraKerningFactor (0.06f));
-        g.drawText (laneNames[l], juce::Rectangle<float> (124.0f, y, 52.0f, lh), juce::Justification::centredRight);
+        g.drawText (dw::Pulse::laneName (kit, l), juce::Rectangle<float> (120.0f, y, 56.0f, lh), juce::Justification::centredRight);
         for (int i = 0; i < N; ++i)
         {
-            const auto cell = juce::Rectangle<float> ((float) gr.getX() + cw * (float) i, y, cw, lh).reduced (2.0f, 2.5f);
+            const auto cell = juce::Rectangle<float> ((float) gr.getX() + cw * (float) i, y, cw, lh).reduced (2.0f, 2.0f);
+            if (i >= len)   // past this lane's length: it loops before it gets here
+            {
+                g.setColour (juce::Colours::white.withAlpha (0.015f));
+                g.fillRect (cell);
+                continue;
+            }
             g.setColour (juce::Colours::white.withAlpha (i % 4 == 0 ? 0.07f : 0.04f));
             g.fillRect (cell);
             if (i == cur && on) { g.setColour (acid.withAlpha (0.14f)); g.fillRect (cell); }
@@ -1796,12 +2190,21 @@ void PerformPanel::paintPulse (juce::Graphics& g)
                 g.fillEllipse (cell.getRight() - 4.0f, cell.getY() + 1.0f, 3.0f, 3.0f);
             }
         }
+        if (len < N)   // where the lane loops
+        {
+            g.setColour (acid.withAlpha (on ? 0.45f : 0.2f));
+            g.fillRect ((float) gr.getX() + cw * (float) len - 1.0f, y + 2.0f, 1.5f, lh - 4.0f);
+        }
     }
     g.setColour (fg3);
     g.setFont (dwui::font (10.0f));
     const char* how[] { "a slow lub-dub", "loose and sparse", "a lazy broken beat", "no beat: things falling", "a soft steady pulse",
-                        "the slime's ears play the drums: high ears tick, low ears thump" };
-    g.drawText (on ? how[juce::jlimit (0, 5, style)] : "PULSE is off", gr.getX(), gr.getBottom() + 2, gr.getWidth(), 14, juce::Justification::right);
+                        "the slime's ears play the drums: high ears tick, low ears thump", "a backbeat with a lilt: turn SWING up",
+                        "one drop on the third beat, hats on the offbeat", "hand drums, three against four", "a rocking low drum and a clave",
+                        "a broken beat that never sits square", "a funky break with ghost snares", "a fast break, snares tumbling: try some CHOP",
+                        "skittering, rolls everywhere: try the IDM kit and STUTTER" };
+    g.drawFittedText (on ? how[juce::jlimit (0, (int) std::size (how) - 1, style)] : "PULSE is off", gr.getX(), gr.getBottom() + 1, gr.getWidth(), 14,
+                      juce::Justification::right, 1, 0.8f);
 }
 
 void PerformPanel::paintTexture (juce::Graphics& g)
@@ -1968,7 +2371,7 @@ void PerformPanel::paintOrganism (juce::Graphics& g)
     g.drawVerticalLine (organismStripX, (float) strip.getY(), (float) strip.getBottom());
     g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.08f));
     for (auto& l : labs)
-        if (l.tab == tab) { g.setColour (fg2); g.drawText (l.t, l.r, juce::Justification::centred); }
+        if (shows (l.tab)) { g.setColour (fg2); g.drawText (l.t, l.r, juce::Justification::centred); }
     g.setColour (listening ? acid.withAlpha (0.8f) : fg3);
     g.setFont (dwui::font (10.0f));
     g.drawFittedText (listening ? juce::String (ears) + " ears listening. When a vein reaches one, it plays" + (plays ? " its note." : " a drum.")
@@ -2407,9 +2810,9 @@ DriftwerkEditor::~DriftwerkEditor()
         juce::Desktop::getInstance().setKioskModeComponent (nullptr);
 }
 
-// FULL SCREEN. The standalone app's own window goes full screen. Inside a host (Ableton) the
-// plugin window can't cover the screen, so the whole rack moves into a borderless window of its
-// own over the whole display, and back again on Esc, F11 or EXIT FULL.
+// FULL SCREEN. The whole rack moves into a borderless window of its own over the whole display
+// (in Ableton and in the standalone app alike), fitted and centred, and comes back on Esc, F11
+// or EXIT FULL.
 void DriftwerkEditor::toggleFullScreen()
 {
     // Switch on the next turn of the message loop: the click or key that asked for it may come
@@ -2421,13 +2824,10 @@ void DriftwerkEditor::toggleFullScreen()
 void DriftwerkEditor::setFull (bool on)
 {
     if (on == full) return;
-    auto* top = getTopLevelComponent();
-    const bool standalone = processor.wrapperType == juce::AudioProcessor::wrapperType_Standalone;
     if (on)
     {
-        if (standalone && top != nullptr && top != this)
-            juce::Desktop::getInstance().setKioskModeComponent (top, false);
-        else
+        // The standalone app does the same as a host now: putting its own window into kiosk mode
+        // let the app's window and the editor's size limits fight, and the rack zoomed in by itself.
         {
             const auto& displays = juce::Desktop::getInstance().getDisplays();
             const auto* d = displays.getDisplayForRect (getScreenBounds());

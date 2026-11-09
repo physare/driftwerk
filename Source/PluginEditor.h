@@ -168,9 +168,10 @@ public:
     void mouseUp (const juce::MouseEvent&) override;
     void refresh();                                    // called by the UI timer
 
-    enum Tab { Sequence, ArpSound, Drone, Chords, Harmony, Loops, Pulse, Texture, Memory, Organism, NumTabs };
+    enum Tab { Sequence, ArpSound, Drone, Chords, Harmony, Loops, Pulse, Texture, Memory, Organism, Words, NumTabs };
     static constexpr int organismStripX = 404;
     void setTab (int t);
+    void setPulsePage (int pg);
 
 private:
     DriftwerkProcessor& proc;
@@ -186,8 +187,17 @@ private:
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> bAtt;
     juce::TextButton tabButtons[NumTabs];
     juce::TextButton chordsOnButton { "CHORDS ON" }, hitsNewButton { "NEW" };
+    juce::TextButton pulsePatternButton { "PATTERN" }, pulseSoundButton { "SOUND" };
+    int pulsePage = 0;                                  // PULSE: 0 the pattern, 1 the sound of each drum
+    static constexpr int PulsePatternPage = 100, PulseSoundPage = 101;   // pseudo tabs for the two PULSE pages
+    bool shows (int ct) const { return ct == tab || (tab == Pulse && ct == PulsePatternPage + pulsePage); }
     juce::TextButton loopsOnButton { "LOOPS ON" }, shuffleButton { "SHUFFLE" }, pulseOnButton { "PULSE ON" }, pulseNewButton { "NEW" },
-                     texOnButton { "TEXTURE ON" }, memOnButton { "MEMORY ON" }, forgetButton { "FORGET" }, slimeOnButton { "SLIME PLAYS" };
+                     texOnButton { "TEXTURE ON" }, memOnButton { "MEMORY ON" }, forgetButton { "FORGET" }, slimeOnButton { "SLIME PLAYS" },
+                     wordsOnButton { "WORDS ON" }, wordsLoadButton { "LOAD WORDS" }, wordsBeatButton { "ON THE BEAT" };
+    std::unique_ptr<juce::FileChooser> wordsChooser;
+    juce::Rectangle<int> wordsBox() const { return { 140, 42, 548, 106 }; }
+    void paintWords (juce::Graphics&);
+    int wordsShown = -1; float wordsGlow = 0.0f; const dw::WordBank* wordsShownBank = nullptr;
     void onOff (juce::TextButton& b, const char* param, int tabId, juce::Rectangle<int> r);
     juce::TextButton editChordsButton { "EDIT THESE" }, newChordsButton { "NEW CHORDS" };
     juce::TextButton holdButton { "HOLD" }, recButton { "REC NOTES" }, newButton { "NEW" }, clearButton { "CLEAR" },
@@ -222,10 +232,14 @@ private:
     // LOOPS, PULSE, TEXTURE, MEMORY, ORGANISM
     void paintLoops (juce::Graphics&);
     void paintPulse (juce::Graphics&);
+    void paintWave (juce::Graphics&);
+    juce::Rectangle<int> waveBox() const { return { 140, 46, 196, 108 }; }
     void paintTexture (juce::Graphics&);
     void paintMemory (juce::Graphics&);
     void paintOrganism (juce::Graphics&);
-    juce::Rectangle<int> pulseGrid() const { return { 182, 44, 506, 110 }; }
+    juce::Rectangle<int> pulseGrid() const { return { 182, 68, 506, 92 }; }
+    static int soundCol (int lane) { return 200 + lane * 74; }   // PULSE SOUND page: the centre of each drum's column
+    static constexpr int soundRowY[3] { 82, 134, 186 };
     juce::Rectangle<int> memStrip() const { return { 14, 44, 672, 86 }; }
     int pulsePaintLane = -1, pulsePaintStep = -1; bool pulsePaintOn = true;
     float laneFlash[dw::Pulse::Lanes] {}; int laneSeen[dw::Pulse::Lanes] {};
@@ -324,6 +338,11 @@ private:
     std::array<juce::Rectangle<int>, 4> moduleLedAreas;
 
     juce::ComboBox presetBox;
+    juce::TextButton presetSaveButton { "SAVE" };
+    juce::Array<juce::File> userPresetFiles;
+    void rebuildPresetMenu();
+    void showPresetSaveMenu();
+    void askPresetName (const juce::String& suggestion);
     juce::TextButton sceneButton { "NEW SCENE" }, randomButton { "RANDOM PATCH" }, clearButton { "PULL ALL" },
                      dimButton { "DIM CABLES" }, loadButton { "LOAD SOUND" }, keyButton { "IN KEY" };
     juce::ComboBox soundBox;
@@ -331,6 +350,15 @@ private:
     std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment> keyAtt;
     void useMyFile();
     std::unique_ptr<juce::FileChooser> chooser;
+    // DREAM: what the loops play, and your own file for MY SOUND.
+    juce::ComboBox dreamSoundBox;
+    juce::TextButton dreamLoadButton { "LOAD" };
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> dreamSoundAtt;
+    juce::Rectangle<int> dreamRect, dreamNameArea;
+    juce::String shownDreamName;
+    juce::String dreamLabelText() const;
+    void chooseDreamSound();
+    void useDreamSound();
 
     juce::String lastPatch;
     int frameCounter = 0;
