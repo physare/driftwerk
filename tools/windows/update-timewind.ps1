@@ -1,5 +1,7 @@
 # Timewind auto-updater: installs the newest GitHub build into %LOCALAPPDATA%\Timewind.
 # Runs from Task Scheduler. Skips while Ableton is open (the plugin file is locked then).
+# The Timewind app can stay open: its files are renamed out of the way (Windows allows that
+# for a running program) and the new version starts the next time you open it.
 $ErrorActionPreference = 'Stop'
 $repo    = 'physare/driftwerk'
 $home_   = Join-Path $env:LOCALAPPDATA 'Timewind'
@@ -29,8 +31,18 @@ function Make-Shortcuts {
     } catch { Log "Shortcuts failed: $_" }
 }
 
+# Copies a file over one that may be in use: if it is locked, the old one is renamed aside first.
+function Replace-File($src, $dst) {
+    try { Copy-Item -Force $src $dst; return } catch { }
+    $aside = "$dst.old-" + [guid]::NewGuid().ToString('N').Substring(0, 8)
+    Move-Item -Force $dst $aside
+    Copy-Item -Force $src $dst
+}
+
 try {
     Make-Shortcuts
+    # Old copies left by a previous update while the app was open (they go once it has closed).
+    Get-ChildItem $home_ -Filter '*.old-*' -ErrorAction SilentlyContinue | Remove-Item -Force -ErrorAction SilentlyContinue
     if (Get-Process -Name 'Ableton Live*' -ErrorAction SilentlyContinue) { Log 'Ableton is running, will try later'; exit 0 }
 
     $tmp = Join-Path $env:TEMP ('timewind-' + [guid]::NewGuid())
@@ -47,16 +59,17 @@ try {
     $vst = Join-Path $home_ 'Timewind.vst3'
     if (Test-Path $vst) { Remove-Item -Recurse -Force $vst }
     Copy-Item -Recurse (Join-Path $unz 'Timewind.vst3') $vst
-    Copy-Item -Force (Join-Path $unz 'Timewind.exe') (Join-Path $home_ 'Timewind.exe')
+    $appOpen = [bool] (Get-Process -Name 'Timewind' -ErrorAction SilentlyContinue)
+    Replace-File (Join-Path $unz 'Timewind.exe') (Join-Path $home_ 'Timewind.exe')
     foreach ($f in @('tw_onnxruntime.dll', 'hand_detector.onnx', 'hand_landmarks_detector.onnx')) {
         $src = Join-Path $unz $f
-        if (Test-Path $src) { Copy-Item -Force $src (Join-Path $home_ $f) }
+        if (Test-Path $src) { Replace-File $src (Join-Path $home_ $f) }
     }
     $self = Join-Path $unz 'update-timewind.ps1'
     if (Test-Path $self) { Copy-Item -Force $self (Join-Path $home_ 'update-timewind.ps1') }
-    Set-Content -NoNewline $current $remote
+    [IO.File]::WriteAllText($current, $remote)   # (Set-Content with -NoNewline and positional arguments misfires on Windows PowerShell 5.1)
     Remove-Item -Recurse -Force $tmp
-    Log "Updated to $remote"
+    Log ("Updated to $remote" + $(if ($appOpen) { ' (the Timewind app was open: close and reopen it to use the new version)' } else { '' }))
     Make-Shortcuts
 } catch {
     Log "Update failed: $_"
