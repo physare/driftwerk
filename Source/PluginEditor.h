@@ -79,7 +79,9 @@ class CableLayer : public juce::Component
 public:
     explicit CableLayer (MainView& v) : view (v) { setInterceptsMouseClicks (false, false); }
     void paint (juce::Graphics&) override;
+    void animate();                                    // a bead of light runs down every cable, as bright as its signal
     MainView& view;
+    float phase = 0.0f;
 };
 
 // A small moving trace of one jack output (an LFO, an envelope, the S&H): the last few seconds.

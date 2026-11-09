@@ -79,10 +79,19 @@ void SlimeLookAndFeel::drawRotarySlider (juce::Graphics& g, int x, int y, int w,
     g.strokePath (value, juce::PathStrokeType (2.2f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
 
     const float ir = radius * 0.6f;
-    g.setColour (juce::Colour (0xff0c0c0c));
+    const bool hot = s.isMouseOverOrDragging();
+    g.setColour (juce::Colours::black.withAlpha (0.6f));
+    g.fillEllipse (c.x - ir - 1.0f, c.y - ir + 1.5f, ir * 2.0f + 2.0f, ir * 2.0f + 2.0f);       // its shadow
+    g.setGradientFill (juce::ColourGradient (juce::Colour (hot ? 0xff2a2a2a : 0xff202020), c.x, c.y - ir,
+                                             juce::Colour (0xff060606), c.x, c.y + ir, false));   // a domed cap
     g.fillEllipse (c.x - ir, c.y - ir, ir * 2.0f, ir * 2.0f);
-    g.setColour (s.isMouseOverOrDragging() ? fg3 : rule);
+    g.setColour (hot ? fg2 : juce::Colour (0x40ffffff));
     g.drawEllipse (c.x - ir, c.y - ir, ir * 2.0f, ir * 2.0f, 1.0f);
+    if (hot)
+    {
+        g.setColour (acid.withAlpha (0.14f));
+        g.strokePath (value, juce::PathStrokeType (10.0f, juce::PathStrokeType::curved, juce::PathStrokeType::rounded));
+    }
     g.setColour (fg);
     g.drawLine (c.x + ir * 0.25f * std::sin (a), c.y - ir * 0.25f * std::cos (a),
                 c.x + ir * 0.95f * std::sin (a), c.y - ir * 0.95f * std::cos (a), 1.6f);
@@ -269,11 +278,24 @@ void JackComponent::mouseUp (const juce::MouseEvent& e)
 
 //==============================================================================
 // Cables are drawn as glowing slime-mold veins.
+static float veinSag (juce::Point<float> a, juce::Point<float> b, float floorY)
+{
+    const float room = juce::jmax (0.0f, (floorY - juce::jmax (a.y, b.y)) / 0.75f);
+    return juce::jmin (14.0f + a.getDistanceFrom (b) * 0.18f, room);
+}
+
+// The point a fraction t of the way along a cable (the same curve drawVein strokes).
+static juce::Point<float> veinPoint (juce::Point<float> a, juce::Point<float> b, float floorY, float t)
+{
+    const float sag = veinSag (a, b, floorY);
+    const juce::Point<float> c1 (a.x + (b.x - a.x) * 0.25f, a.y + sag), c2 (b.x - (b.x - a.x) * 0.25f, b.y + sag);
+    const float u = 1.0f - t;
+    return a * (u * u * u) + c1 * (3.0f * u * u * t) + c2 * (3.0f * u * t * t) + b * (t * t * t);
+}
+
 static void drawVein (juce::Graphics& g, juce::Point<float> a, juce::Point<float> b, juce::Colour col, float alpha, float floorY)
 {
-    const float dist = a.getDistanceFrom (b);
-    const float room = juce::jmax (0.0f, (floorY - juce::jmax (a.y, b.y)) / 0.75f);
-    const float sag = juce::jmin (14.0f + dist * 0.18f, room);
+    const float sag = veinSag (a, b, floorY);
     juce::Path p;
     p.startNewSubPath (a);
     p.cubicTo (a.x + (b.x - a.x) * 0.25f, a.y + sag, b.x - (b.x - a.x) * 0.25f, b.y + sag, b.x, b.y);
@@ -306,12 +328,49 @@ void CableLayer::paint (juce::Graphics& g)
     {
         const int o = view.proc.patch[(size_t) i].load();
         if (o < 0) continue;
-        drawVein (g, view.jackCentre (true, o), view.jackCentre (false, i), view.cableColour (o, i), alpha, floorY);
+        const auto a = view.jackCentre (true, o), b = view.jackCentre (false, i);
+        drawVein (g, a, b, view.cableColour (o, i), alpha, floorY);
+        // The bead: it runs from the output to the input and glows with the signal.
+        const float level = juce::jlimit (0.0f, 1.0f, std::abs (view.proc.monitor[(size_t) o].load()) * 1.5f);
+        if (level > 0.03f && ! view.cablesDimmed)
+        {
+            float t = phase + (float) ((o * 37 + i * 11) % 100) * 0.01f;
+            t -= std::floor (t);
+            const auto pt = veinPoint (a, b, floorY, t);
+            const float fade = std::sin (t * juce::MathConstants<float>::pi);   // in and out at the jacks
+            g.setColour (juce::Colours::white.withAlpha (0.22f * level * fade));
+            g.fillEllipse (pt.x - 6.0f, pt.y - 6.0f, 12.0f, 12.0f);
+            g.setColour (juce::Colours::white.withAlpha (0.9f * level * fade));
+            g.fillEllipse (pt.x - 2.2f, pt.y - 2.2f, 4.4f, 4.4f);
+        }
     }
     if (view.dragOut >= 0)
         drawVein (g, view.jackCentre (true, view.dragOut), view.dragPos, acid, 1.0f, floorY);
     else if (view.dragIn >= 0)
         drawVein (g, view.dragPos, view.jackCentre (false, view.dragIn), acid, 1.0f, floorY);
+}
+
+void CableLayer::animate()
+{
+    if (view.cablesDimmed) return;
+    const float floorY = (float) getHeight() - 8.0f;
+    const float next = phase + 0.022f;
+    // Only the little squares the beads leave and enter are redrawn, never the whole rack.
+    for (int i = 0; i < NumIns; ++i)
+    {
+        const int o = view.proc.patch[(size_t) i].load();
+        if (o < 0) continue;
+        const auto a = view.jackCentre (true, o), b = view.jackCentre (false, i);
+        const float off = (float) ((o * 37 + i * 11) % 100) * 0.01f;
+        for (float ph : { phase, next })
+        {
+            float t = ph + off;
+            t -= std::floor (t);
+            const auto pt = veinPoint (a, b, floorY, t);
+            repaint ((int) pt.x - 8, (int) pt.y - 8, 16, 16);
+        }
+    }
+    phase = next - std::floor (next);
 }
 
 //==============================================================================
@@ -1118,10 +1177,13 @@ void MainView::paint (juce::Graphics& g)
     {
         const auto& sp = specs[i];
         const auto r = moduleRects[i].toFloat().reduced (2.0f, 0.0f);
-        g.setColour (panel);
+        // A little depth: lighter at the top, a bright top edge, darker towards the jacks.
+        g.setGradientFill (juce::ColourGradient (juce::Colour (0xff101010), r.getX(), r.getY(), juce::Colour (0xff040404), r.getX(), r.getBottom(), false));
         g.fillRect (r);
         g.setColour (rule);
         g.drawRect (r, 1.0f);
+        g.setColour (juce::Colour (0x38ffffff));
+        g.fillRect (r.getX() + 1.0f, r.getY(), r.getWidth() - 2.0f, 1.0f);
         g.setColour (fg);
         g.setFont (dwui::font (15.0f));
         g.drawText (sp.title, (int) r.getX() + 10, (int) r.getY() + 6, (int) r.getWidth() - 20, 18, juce::Justification::left);
@@ -1142,9 +1204,9 @@ void MainView::paint (juce::Graphics& g)
 
     for (auto& l : labels)
     {
-        g.setColour (l.jack ? fg3 : fg2);
-        g.setFont (dwui::font (l.jack ? 9.5f : 10.5f).withExtraKerningFactor (0.06f));
-        g.drawText (l.text, l.r, juce::Justification::centred);
+        g.setColour (l.jack ? fg3 : juce::Colour (0xc0ffffff));
+        g.setFont (dwui::font (l.jack ? 10.0f : 11.5f).withExtraKerningFactor (0.05f));
+        g.drawFittedText (l.text, l.r, juce::Justification::centred, 1, 0.85f);
     }
     if (! dreamNameArea.isEmpty())
     {
@@ -1585,7 +1647,7 @@ void MainView::timerCallback()
     grainView->repaint();
     bassView->refresh();
     layers->refresh();
-    if ((++frameCounter & 1) == 0) cameraView->repaint();
+    if ((++frameCounter & 1) == 0) { cameraView->repaint(); if (dragOut < 0 && dragIn < 0) cables->animate(); }
     repaint (arpLedArea.expanded (8));
     repaint (playRect.withTrimmedTop (250));
     for (auto& r : moduleLedAreas) if (! r.isEmpty()) repaint (r.expanded (10));
