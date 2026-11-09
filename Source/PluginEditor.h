@@ -370,7 +370,7 @@ private:
 // FULL SCREEN inside a host: a borderless window of its own over the whole screen. The rack
 // moves into it and comes back to the plugin window when you leave (Esc, F11 or EXIT FULL).
 class DriftwerkEditor;
-class FullScreenWindow : public juce::Component
+class FullScreenWindow : public juce::Component, private juce::Timer
 {
 public:
     explicit FullScreenWindow (DriftwerkEditor& e);
@@ -378,7 +378,14 @@ public:
     void resized() override;
     bool keyPressed (const juce::KeyPress&) override;
     void userTriedToCloseWindow() override;
+    void keepCoveringScreen();       // starts the guard below
     DriftwerkEditor& editor;
+
+private:
+    // With Windows display scaling the window can be grown past the screen after it opens;
+    // this checks a few times a second that it still covers exactly its monitor.
+    void timerCallback() override;
+    int fixes = 0;
 };
 
 class DriftwerkEditor : public juce::AudioProcessorEditor

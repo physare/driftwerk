@@ -1,5 +1,7 @@
 #include "PluginEditor.h"
 
+namespace dwnative { bool coverMonitor (void* nativeHandle); }   // NativeWindow.cpp
+
 using namespace dw;
 using namespace dwui;
 
@@ -2839,9 +2841,11 @@ void DriftwerkEditor::setFull (bool on)
             if (fullScreenOnDesktop)
             {
                 fsWindow->addToDesktop (juce::ComponentPeer::windowAppearsOnTaskbar);
+                fsWindow->setBounds (area);          // again, now that the window lives on that display
                 fsWindow->setVisible (true);
                 fsWindow->toFront (true);
                 fsWindow->grabKeyboardFocus();
+                fsWindow->keepCoveringScreen();
             }
         }
     }
@@ -2901,6 +2905,21 @@ FullScreenWindow::FullScreenWindow (DriftwerkEditor& e) : editor (e)
     setName ("Timewind");
     setOpaque (true);
     setWantsKeyboardFocus (true);
+}
+
+void FullScreenWindow::keepCoveringScreen()
+{
+    timerCallback();
+    startTimer (250);
+}
+
+void FullScreenWindow::timerCallback()
+{
+    // Windows decides the monitor's size here, in the window's own units; JUCE then reads the
+    // window's real size back and resized() fits the rack into it. Capped, so it can never fight.
+    if (auto* peer = getPeer())
+        if (fixes < 40 && dwnative::coverMonitor (peer->getNativeHandle()))
+            ++fixes;
 }
 
 void FullScreenWindow::resized()

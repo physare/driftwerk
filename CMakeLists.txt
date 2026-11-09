@@ -1,5 +1,5 @@
 cmake_minimum_required(VERSION 3.22)
-project(Timewind VERSION 0.6.0)
+project(Timewind VERSION 0.6.1)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -63,7 +63,8 @@ juce_add_plugin(Timewind
 
 target_sources(Timewind PRIVATE
     Source/PluginProcessor.cpp
-    Source/PluginEditor.cpp)
+    Source/PluginEditor.cpp
+    Source/NativeWindow.cpp)
 
 target_compile_definitions(Timewind PUBLIC
     JUCE_WEB_BROWSER=0
@@ -87,7 +88,7 @@ target_link_libraries(Timewind
 option(DRIFTWERK_BUILD_TOOLS "Build the offline render test tool" OFF)
 if(DRIFTWERK_BUILD_TOOLS)
     juce_add_console_app(DriftwerkRender PRODUCT_NAME "DriftwerkRender")
-    target_sources(DriftwerkRender PRIVATE tools/Render.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp)
+    target_sources(DriftwerkRender PRIVATE tools/Render.cpp Source/PluginProcessor.cpp Source/PluginEditor.cpp Source/NativeWindow.cpp)
     target_compile_definitions(DriftwerkRender PRIVATE JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_USE_CAMERA=0)
     target_link_libraries(DriftwerkRender PRIVATE juce::juce_audio_utils juce::juce_audio_formats juce::juce_video juce::juce_dsp
         PUBLIC juce::juce_recommended_config_flags)
