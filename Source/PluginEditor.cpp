@@ -149,6 +149,22 @@ void SlimeLookAndFeel::drawLinearSlider (juce::Graphics& g, int x, int y, int w,
     g.fillRect ((float) x, cy - 1.0f, pos - (float) x, 2.0f);
     g.setColour (dim ? fg2 : (s.isMouseOverOrDragging() ? fg : acid));
     g.fillRect (pos - 1.5f, cy - 6.0f, 3.0f, 12.0f);
+    if ((int) s.getProperties().getWithDefault ("modSrc", -1) >= 0)
+    {
+        const float depth = s.getProperties()["modDepth"], now = s.getProperties()["modNow"];
+        const float p0 = (pos - (float) x) / (float) juce::jmax (1, w);
+        const float from = juce::jlimit (0.0f, 1.0f, depth >= 0 ? p0 : p0 + depth), to = juce::jlimit (0.0f, 1.0f, depth >= 0 ? p0 + depth : p0);
+        g.setColour (fg.withAlpha (0.6f));
+        g.fillRect ((float) x + from * (float) w, cy + 4.0f, (to - from) * (float) w, 1.0f);
+        if (now >= 0.0f)
+        {
+            const float nx = (float) x + now * (float) w;
+            g.setColour (acid.withAlpha (0.3f));
+            g.fillEllipse (nx - 3.0f, cy + 1.5f, 6.0f, 6.0f);
+            g.setColour (fg);
+            g.fillEllipse (nx - 2.0f, cy + 2.5f, 4.0f, 4.0f);
+        }
+    }
 }
 
 void SlimeLookAndFeel::drawToggleButton (juce::Graphics& g, juce::ToggleButton& b, bool over, bool)
@@ -831,6 +847,7 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     bassView->setBounds (1510, rowTop (3) + 172, 250, 200);
     addAndMakeVisible (*bassView);
     layers = std::make_unique<LayersPanel> (proc);
+    layers->onModMenu = [this] (ModSlider& sl) { showModMenu (sl); };
     layers->setBounds (1508, rowTop (2) + 44, 256, DriftwerkProcessor::numLayers * LayersPanel::rowH);
     addAndMakeVisible (*layers);
 
@@ -889,6 +906,15 @@ MainView::MainView (DriftwerkProcessor& p) : proc (p)
     fullButton.onClick = [this] { openFullCamera (true); };
     fullButton.getProperties().set ("accent", true);
     addAndMakeVisible (fullButton);
+    morph = std::make_unique<MorphPanel> (proc);
+    morph->onModMenu = [this] (ModSlider& sl) { showModMenu (sl); };
+    morph->onClose = [this] { showMorph (false); };
+    addChildComponent (*morph);
+    morphButton.setTooltip ("MORPH: store the knobs as A and B, then glide every knob between them");
+    morphButton.setClickingTogglesState (false);
+    morphButton.onClick = [this] { showMorph (! morph->isVisible()); };
+    addAndMakeVisible (morphButton);
+
     fullCam = std::make_unique<FullCameraView> (proc, *slime);
     fullCam->onClose = [this] { openFullCamera (false); };
     addChildComponent (*fullCam);
@@ -1017,10 +1043,18 @@ void MainView::paint (juce::Graphics& g)
     g.drawText ("Grow sound with your hands.", 150, 8, 260, 40, juce::Justification::centredLeft);
     g.setColour (fg3);
     g.setFont (dwui::font (11.0f));
-    g.drawFittedText ("drag jacks to patch, right-click to unplug\nright-click a knob to play it by hand",
+    g.drawFittedText ("drag jacks to patch, right-click to unplug\nright-click a knob: LFO, drift or your hand",
                       330, 8, 205, 40, juce::Justification::centredLeft, 2);
     g.setColour (rule);
     g.drawHorizontalLine (52, 0.0f, (float) getWidth());
+    if (shownMorphPos >= 0.0f)
+    {
+        const auto mb = morphBar.toFloat();
+        g.setColour (fg3);
+        g.fillRect (mb.getX(), mb.getCentreY() - 0.5f, mb.getWidth(), 1.0f);
+        g.setFont (dwui::font (8.5f));
+        drawGlowDot (g, { mb.getX() + mb.getWidth() * juce::jlimit (0.0f, 1.0f, shownMorphPos), mb.getCentreY() }, 1.0f, 2.2f);
+    }
 
     // Modules
     for (size_t i = 0; i < specs.size(); ++i)
@@ -1118,10 +1152,20 @@ void MainView::openFullCamera (bool open)
     if (open) { fullCam->toFront (true); fullCam->grabKeyboardFocus(); }
 }
 
+void MainView::showMorph (bool open)
+{
+    morph->setVisible (open);
+    morphButton.setToggleState (open, juce::dontSendNotification);
+    if (open) { morph->refresh(); morph->toFront (false); }
+}
+
 void MainView::resized()
 {
     cables->setBounds (getLocalBounds());
     fullCam->setBounds (getLocalBounds());
+    morphButton.setBounds (getWidth() - 1044, 14, 78, 26);
+    morphBar = { morphButton.getX() + 6, 43, morphButton.getWidth() - 12, 5 };
+    morph->setBounds (morphButton.getX() - 150, 56, 460, 214);
     recordButton.setBounds (getWidth() - 958, 14, 76, 26);
     filesButton.setBounds (getWidth() - 878, 14, 88, 26);
     screenButton.setBounds (getWidth() - 786, 14, 98, 26);
@@ -1284,48 +1328,89 @@ void MainView::useMyFile()
     proc.syncGrainSource();
 }
 
+// The modulation ring on a knob (or the dot on a fader): where the modulation has it now.
+void syncModRing (ModSlider& sl, DriftwerkProcessor& proc)
+{
+    if (sl.paramIndex < 0) return;
+    auto& slot = *proc.mods[(size_t) sl.paramIndex];
+    const int src = slot.source.load();
+    const float now = src >= 0 ? slot.now.load() : -1.0f;
+    auto& props = sl.getProperties();
+    if (! props.contains ("modSrc") || (int) props["modSrc"] != src || std::abs ((float) props["modNow"] - now) > 0.004f
+        || std::abs ((float) props["modDepth"] - slot.depth.load()) > 0.001f)
+    {
+        props.set ("modSrc", src); props.set ("modNow", now); props.set ("modDepth", slot.depth.load());
+        sl.repaint();
+    }
+}
+
+namespace
+{
+// DEPTH in the right-click menu: a fader from -100% to +100% that stays open while you drag it.
+struct DepthItem : public juce::PopupMenu::CustomComponent
+{
+    DepthItem (DriftwerkProcessor& p, int paramIdx) : juce::PopupMenu::CustomComponent (false), proc (p), idx (paramIdx)
+    {
+        slider.setSliderStyle (juce::Slider::LinearHorizontal);
+        slider.setTextBoxStyle (juce::Slider::TextBoxRight, false, 52, 18);
+        slider.setRange (-100.0, 100.0, 1.0);
+        slider.setTextValueSuffix ("%");
+        slider.setColour (juce::Slider::textBoxTextColourId, dwui::fg);
+        slider.setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+        slider.setColour (juce::Slider::textBoxBackgroundColourId, juce::Colours::transparentBlack);
+        slider.setValue (std::round (proc.mods[(size_t) idx]->depth.load() * 100.0f), juce::dontSendNotification);
+        slider.onValueChange = [this] { proc.mods[(size_t) idx]->depth.store ((float) slider.getValue() / 100.0f); };
+        slider.onDragEnd = [this] { proc.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true)); };
+        addAndMakeVisible (slider);
+    }
+    void getIdealSize (int& w, int& h) override { w = 240; h = 30; }
+    void resized() override { slider.setBounds (getLocalBounds().reduced (10, 5)); }
+    DriftwerkProcessor& proc;
+    const int idx;
+    juce::Slider slider;
+};
+} // namespace
+
 void MainView::showModMenu (ModSlider& s)
 {
     if (s.paramIndex < 0) return;
     auto& slot = *proc.mods[(size_t) s.paramIndex];
     const int current = slot.source.load();
-    const float depth = slot.depth.load();
-
     struct Src { int out; const char* name; };
+    const int drift = DriftwerkProcessor::driftSource;
+    // Over time first: the two LFOs (their speed is on the LFO modules) and DRIFT, which gives
+    // this knob a slow wander of its own. Then the other modulators, then your hand.
+    const Src timeSources[] { { O_LFO1, "LFO 1  (its RATE and SHAPE are on the LFO 1 module)" }, { O_LFO2, "LFO 2" },
+                              { drift + 0, "Drift slowly  (wanders on its own, about a minute a move)" },
+                              { drift + 1, "Drift  (about 10 seconds a move)" }, { drift + 2, "Drift fast  (a few seconds a move)" } };
+    const Src otherSources[] { { O_SNH, "S&H random  (a new value on every CLK /4)" }, { O_ENV2, "ENV 2" }, { O_ARP_RND, "Arp random  (a new value every arp step)" },
+                               { O_BASS_GATE, "Bass gate" } };
     const Src handSources[] { { O_CAM_X, "Hand X  (left / right)" }, { O_CAM_Y, "Hand Y  (up / down)" },
                               { O_CAM_MOTION, "Hand motion  (how much you move)" },
                               { O_CAM_PINCH, "Pinch  (thumb to index finger)" }, { O_CAM_SPREAD, "Spread  (fingers fanned open)" },
                               { O_CAM_FIST, "Fist  (fingers curled)" }, { O_CAM_TILT, "Tilt  (hand leaning)" } };
-    const Src otherSources[] { { O_LFO1, "LFO 1" }, { O_LFO2, "LFO 2" }, { O_SNH, "S&H random" },
-                               { O_ENV2, "ENV 2" }, { O_ARP_RND, "Arp random" } };
 
     juce::PopupMenu m;
-    m.addSectionHeader ("Control this knob with...");
-    for (auto& h : handSources) m.addItem (1000 + h.out, h.name, true, current == h.out);
-    juce::PopupMenu others;
+    m.addSectionHeader ("Move this knob with...");
+    for (auto& t : timeSources) m.addItem (1000 + t.out, t.name, true, current == t.out);
+    juce::PopupMenu others, hands;
     for (auto& o : otherSources) others.addItem (1000 + o.out, o.name, true, current == o.out);
-    m.addSubMenu ("Other modulators", others);
-    m.addItem (1, "Nothing (manual only)", current >= 0, current < 0);
+    for (auto& h : handSources) hands.addItem (1000 + h.out, h.name, true, current == h.out);
+    m.addSubMenu ("Other modulators", others, true, nullptr, current == O_SNH || current == O_ENV2 || current == O_ARP_RND || current == O_BASS_GATE);
+    m.addSubMenu ("Your hand (camera)", hands, true, nullptr, (current >= O_CAM_X && current <= O_CAM_TRIG) || (current >= O_CAM_PINCH && current <= O_CAM_TILT));
+    m.addItem (1, "Nothing (it stays where you set it)", current >= 0, current < 0);
     m.addSeparator();
-    m.addSectionHeader ("Depth");
-    const float depths[] { 0.15f, 0.3f, 0.5f, 1.0f, -0.3f, -0.5f, -1.0f };
-    for (int k = 0; k < 7; ++k)
-        m.addItem (100 + k, (depths[k] > 0 ? "+" : "") + juce::String (juce::roundToInt (depths[k] * 100)) + "%",
-                   true, std::abs (depth - depths[k]) < 0.01f);
+    m.addSectionHeader ("How far it moves (minus turns it the other way)");
+    m.addCustomItem (2, std::make_unique<DepthItem> (proc, s.paramIndex), nullptr, "Depth");
 
     juce::Component::SafePointer<ModSlider> safe (&s);
     m.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&s),
-        [this, safe, depths] (int r)
+        [this, safe] (int r)
         {
             if (r == 0 || safe == nullptr) return;
             auto& sl = *proc.mods[(size_t) safe->paramIndex];
             if (r == 1) sl.source.store (-1);
             else if (r >= 1000) sl.source.store (r - 1000);
-            else if (r >= 100 && r < 107)
-            {
-                sl.depth.store (depths[r - 100]);
-                if (sl.source.load() < 0) sl.source.store (O_CAM_Y);
-            }
             proc.updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
         });
 }
@@ -1411,19 +1496,18 @@ void MainView::timerCallback()
         else if (want != 0 && presetBox.getSelectedId() != want) presetBox.setSelectedId (want, juce::dontSendNotification);
     }
 
-    for (auto& sl : sliders)
+    for (auto& sl : sliders) syncModRing (*sl, proc);
+    if (morph->isVisible()) morph->refresh();
     {
-        if (sl->paramIndex < 0) continue;
-        auto& slot = *proc.mods[(size_t) sl->paramIndex];
-        const int src = slot.source.load();
-        const float now = src >= 0 ? slot.now.load() : -1.0f;
-        auto& props = sl->getProperties();
-        if ((int) props["modSrc"] != src || std::abs ((float) props["modNow"] - now) > 0.004f
-            || std::abs ((float) props["modDepth"] - slot.depth.load()) > 0.001f)
+        // The little A-B line under MORPH, once both are stored.
+        float mp = -1.0f;
+        if (proc.hasMorph (0) && proc.hasMorph (1))
         {
-            props.set ("modSrc", src); props.set ("modNow", now); props.set ("modDepth", slot.depth.load());
-            sl->repaint();
+            const int k = proc.paramIndex ("morph.pos");
+            const auto& slot = *proc.mods[(size_t) k];
+            mp = slot.source.load() >= 0 ? slot.now.load() : proc.apvts.getRawParameterValue ("morph.pos")->load();
         }
+        if (std::abs (mp - shownMorphPos) > 0.002f) { shownMorphPos = mp; repaint (morphBar.expanded (4)); }
     }
 
     for (auto& j : outJacks)
@@ -1546,6 +1630,8 @@ LayersPanel::LayersPanel (DriftwerkProcessor& p) : proc (p)
     {
         const auto& ld = DriftwerkProcessor::layerDefs[k];
         auto& s = levels[k];
+        s.paramIndex = proc.paramIndex (ld.level);
+        s.onRightClick = [this, &s] { if (onModMenu) onModMenu (s); };
         s.setSliderStyle (juce::Slider::LinearHorizontal);
         s.setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
         s.setPopupDisplayEnabled (true, true, this, 900);
@@ -1574,6 +1660,7 @@ void LayersPanel::resized()
 
 void LayersPanel::refresh()
 {
+    for (auto& l : levels) syncModRing (l, proc);
     for (int k = 0; k < DriftwerkProcessor::numLayers; ++k)
     {
         const bool muted = mutes[k].getToggleState();
@@ -1606,6 +1693,108 @@ void LayersPanel::paint (juce::Graphics& g)
         g.drawText (DriftwerkProcessor::layerDefs[k].name, 2, y, nameW, rowH, juce::Justification::centredLeft);
         drawGlowDot (g, { (float) meterX, (float) y + rowH * 0.5f }, shownMuted[k] ? 0.0f : glow[k], 2.4f);
     }
+}
+
+//==============================================================================
+MorphPanel::MorphPanel (DriftwerkProcessor& p) : proc (p)
+{
+    storeA.setTooltip ("Remember every knob as it is now, as A");
+    storeB.setTooltip ("Remember every knob as it is now, as B");
+    storeA.onClick = [this] { proc.storeMorph (0); refresh(); };
+    storeB.onClick = [this] { proc.storeMorph (1); refresh(); };
+    closeButton.getProperties().set ("small", true);
+    closeButton.onClick = [this] { if (onClose) onClose(); };
+    for (auto* b : { &storeA, &storeB, &closeButton }) addAndMakeVisible (*b);
+
+    pos.paramIndex = proc.paramIndex ("morph.pos");
+    pos.onRightClick = [this] { if (onModMenu) onModMenu (pos); };
+    time.paramIndex = proc.paramIndex ("morph.time");
+    time.onRightClick = [this] { if (onModMenu) onModMenu (time); };
+    for (auto* s : { &pos, &time })
+    {
+        s->setSliderStyle (juce::Slider::LinearHorizontal);
+        s->setTextBoxStyle (juce::Slider::NoTextBox, false, 0, 0);
+        s->setMouseDragSensitivity (240);
+        addAndMakeVisible (*s);
+    }
+    pos.setPopupDisplayEnabled (true, true, this, 900);
+    posAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, "morph.pos", pos);
+    timeAtt = std::make_unique<juce::AudioProcessorValueTreeState::SliderAttachment> (proc.apvts, "morph.time", time);
+    if (auto* param = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter ("morph.move")))
+        move.addItemList (param->choices, 1);
+    addAndMakeVisible (move);
+    moveAtt = std::make_unique<juce::AudioProcessorValueTreeState::ComboBoxAttachment> (proc.apvts, "morph.move", move);
+}
+
+void MorphPanel::resized()
+{
+    const int w = getWidth();
+    closeButton.setBounds (w - 64, 10, 54, 20);
+    storeA.setBounds (12, 48, 84, 28);
+    storeB.setBounds (w - 96, 48, 84, 28);
+    pos.setBounds (106, 48, w - 212, 28);
+    move.setBounds (60, 104, 130, 24);
+    time.setBounds (250, 104, w - 250 - 86, 24);
+}
+
+void MorphPanel::refresh()
+{
+    syncModRing (pos, proc);
+    syncModRing (time, proc);
+    const bool a = proc.hasMorph (0), b = proc.hasMorph (1);
+    const auto tt = DriftwerkProcessor::morphTimeText (proc.apvts.getRawParameterValue ("morph.time")->load());
+    if (a != shownA || b != shownB || tt != shownTime)
+    {
+        shownA = a; shownB = b; shownTime = tt;
+        storeA.getProperties().set ("accent", a);
+        storeB.getProperties().set ("accent", b);
+        storeA.repaint(); storeB.repaint();
+        pos.getProperties().set ("dim", ! (a && b));
+        pos.repaint();
+        repaint();
+    }
+}
+
+void MorphPanel::paint (juce::Graphics& g)
+{
+    using namespace dwui;
+    const auto r = getLocalBounds().toFloat();
+    g.setColour (juce::Colours::black);
+    g.fillRect (r);
+    g.setColour (fg2);
+    g.drawRect (r, 1.0f);
+    g.setColour (fg);
+    g.setFont (dwui::font (15.0f));
+    g.drawText ("Morph", 12, 8, 200, 18, juce::Justification::left);
+    g.setColour (fg3);
+    g.setFont (dwui::font (10.5f));
+    g.drawText ("every knob, from one sound to another", 12, 24, 300, 13, juce::Justification::left);
+    g.setColour (acid);
+    g.fillRect (12.0f, 39.0f, 14.0f, 1.0f);
+
+    g.setFont (dwui::font (10.0f).withExtraKerningFactor (0.06f));
+    g.setColour (fg3);
+    g.drawText (shownA ? "stored" : "empty", 12, 78, 84, 14, juce::Justification::centred);
+    g.drawText (shownB ? "stored" : "empty", getWidth() - 96, 78, 84, 14, juce::Justification::centred);
+    g.setColour (fg2);
+    g.drawText ("MOVE", 12, 104, 44, 24, juce::Justification::centredLeft);
+    g.drawText ("TIME", 206, 104, 40, 24, juce::Justification::centredLeft);
+    g.setColour (fg);
+    g.drawText (shownTime, getWidth() - 82, 104, 72, 24, juce::Justification::centredLeft);
+
+    juce::String help;
+    if (! shownA && ! shownB) help = "Set the knobs how you like them and press STORE A.";
+    else if (! shownB) help = "Now change the knobs, or load another preset, and press STORE B.";
+    else if (! shownA) help = "Press STORE A for the other end.";
+    else help = "Slide from A to B, or pick a MOVE: every knob glides there over TIME (A to B, back, or wandering).";
+    g.setColour (fg2);
+    g.setFont (dwui::font (11.5f));
+    g.drawFittedText (help, 12, 140, getWidth() - 24, 32, juce::Justification::topLeft, 2, 1.0f);
+    g.setColour (fg3);
+    g.setFont (dwui::font (10.5f));
+    g.drawFittedText ("Menus and switches flip part way. Tempo, volume, the cables and the patterns stay as they are. "
+                      "Right-click the fader for an LFO or drift.",
+                      12, 174, getWidth() - 24, 32, juce::Justification::topLeft, 2, 1.0f);
 }
 
 //==============================================================================
@@ -1926,6 +2115,7 @@ void PerformPanel::knob (const char* param, const char* label, int tabId, int x,
     s->paramIndex = proc.paramIndex (param);
     auto* raw = s.get();
     s->onRightClick = [this, raw] { view.showModMenu (*raw); };
+    modKnobs.push_back (raw);
     s->setRotaryParameters (juce::MathConstants<float>::pi * 1.2f, juce::MathConstants<float>::pi * 2.8f, true);
     s->setPopupDisplayEnabled (true, true, &view, 900);
     s->setBounds (x + 22, y, 50, 50);
@@ -2096,6 +2286,7 @@ void PerformPanel::setPulsePage (int pg)
 
 void PerformPanel::refresh()
 {
+    for (auto* k : modKnobs) if (k->isVisible()) syncModRing (*k, proc);
     recButton.setToggleState (proc.recordNotes.load(), juce::dontSendNotification);
     for (int i = 0; i < DriftwerkProcessor::numSlots; ++i)
     {

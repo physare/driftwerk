@@ -53,6 +53,8 @@ public:
     void mouseUp (const juce::MouseEvent& e) override { if (! e.mods.isPopupMenu()) juce::Slider::mouseUp (e); }
 };
 
+void syncModRing (ModSlider& s, DriftwerkProcessor& proc);   // updates the ring that shows a knob's modulation
+
 //==============================================================================
 class JackComponent : public juce::Component
 {
@@ -148,13 +150,36 @@ public:
     void refresh();                                    // called by the UI timer
     static constexpr int rowH = 22, nameW = 64, meterX = 70;
     DriftwerkProcessor& proc;
-    juce::Slider levels[DriftwerkProcessor::numLayers];
+    ModSlider levels[DriftwerkProcessor::numLayers];
+    std::function<void (ModSlider&)> onModMenu;            // right-click a fader: LFO, drift or hand, like a knob
     juce::TextButton mutes[DriftwerkProcessor::numLayers];
     float glow[DriftwerkProcessor::numLayers] {};
     bool shownMuted[DriftwerkProcessor::numLayers] {};
     // after the controls they watch, so they go first
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment>> sAtt;
     std::vector<std::unique_ptr<juce::AudioProcessorValueTreeState::ButtonAttachment>> bAtt;
+};
+
+//==============================================================================
+// MORPH: store the knobs as A and as B, then glide every one of them between the two,
+// with the fader or on its own (MOVE, over TIME).
+class MorphPanel : public juce::Component
+{
+public:
+    explicit MorphPanel (DriftwerkProcessor& p);
+    void paint (juce::Graphics&) override;
+    void resized() override;
+    void refresh();                                    // called by the UI timer
+    DriftwerkProcessor& proc;
+    std::function<void (ModSlider&)> onModMenu;        // right-click the A-B fader: LFO or drift
+    std::function<void()> onClose;
+    juce::TextButton storeA { "STORE A" }, storeB { "STORE B" }, closeButton { "CLOSE" };
+    ModSlider pos, time;
+    juce::ComboBox move;
+    bool shownA = false, shownB = false;
+    juce::String shownTime;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::SliderAttachment> posAtt, timeAtt;
+    std::unique_ptr<juce::AudioProcessorValueTreeState::ComboBoxAttachment> moveAtt;
 };
 
 //==============================================================================
@@ -250,6 +275,7 @@ private:
                      leftButton { "<" }, rightButton { ">" }, saveButton { "SAVE" };
     juce::TextButton slotButtons[DriftwerkProcessor::numSlots];
     int lastSlot = -1;
+    std::vector<ModSlider*> modKnobs;                   // every knob on the tabs, so their modulation rings move
 
     void knob (const char* param, const char* label, int tabId, int x, int y);
     void combo (const char* param, const char* label, int tabId, int x, int y, int w);
@@ -327,6 +353,7 @@ public:
     void refreshNow() { timerCallback(); } // used by the offline render tool
     void showFullCamera() { openFullCamera (true); } // used by the offline render tool
     void showPerformTab (int t);
+    void showMorph (bool open);                            // also used by the offline render tool
     void setFullScreenLabel (bool isFull);
     std::function<void()> onFullScreen;                    // set by the editor
     void advanceSlime (int steps) { for (int i = 0; i < steps / 2; ++i) proc.organism.tick(); }   // offline renders
@@ -379,6 +406,10 @@ private:
     std::unique_ptr<PerformPanel> perform;
     std::unique_ptr<BassView> bassView;
     std::unique_ptr<LayersPanel> layers;
+    std::unique_ptr<MorphPanel> morph;
+    juce::TextButton morphButton { "MORPH" };
+    juce::Rectangle<int> morphBar;                         // under MORPH: where the A-B fader is now
+    float shownMorphPos = -1.0f;
     friend class PerformPanel;
     juce::TextButton recordButton { "REC" }, filesButton { "RECORDINGS" }, screenButton { "FULL SCREEN" };
     juce::TextButton fullButton { "CAMERA" };

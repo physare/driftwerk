@@ -865,6 +865,11 @@ juce::AudioProcessorValueTreeState::ParameterLayout DriftwerkProcessor::createLa
     fl ("mem.blur", "Memory Blur", NRange (0.0f, 1.0f), 0.35f);
     fl ("mem.scatter", "Memory Scatter", NRange (0.0f, 1.0f), 0.4f);
     fl ("mem.dissolve", "Memory Dissolve", NRange (0.0f, 0.9f), 0.35f);
+    // MORPH: glide every knob between two snapshots, A and B
+    fl ("morph.pos", "Morph A-B", NRange (0.0f, 1.0f), 0.0f);
+    ch ("morph.move", "Morph Move", juce::StringArray { "HOLD", "A TO B", "B TO A", "BACK + FORTH", "WANDER" }, 0);
+    ps.push_back (std::make_unique<AudioParameterFloat> (ParameterID { "morph.time", 1 }, "Morph Time", skewed (5.0f, 600.0f, 60.0f), 60.0f,
+        AudioParameterFloatAttributes().withStringFromValueFunction ([] (float v, int) { return DriftwerkProcessor::morphTimeText (v); })));
 
     return { ps.begin(), ps.end() };
 }
@@ -920,6 +925,24 @@ DriftwerkProcessor::DriftwerkProcessor()
             mods.push_back (std::make_unique<ModSlot>());
         }
     effective.resize (paramList.size(), 0.0f);
+    drifts.resize (paramList.size());
+    // MORPH: which knobs it moves, which ones flip rather than glide, and where each one flips
+    // (spread across the middle, so a scene changes over a while instead of all at once).
+    morphStepped.resize (paramList.size(), 0);
+    morphSkip.resize (paramList.size(), 0);
+    morphFlipAt.resize (paramList.size(), 0.5f);
+    for (size_t k = 0; k < paramList.size(); ++k)
+    {
+        auto* rp = paramList[k];
+        const auto id = rp->getParameterID();
+        morphSkip[k] = morphSkips (id) ? 1 : 0;
+        morphStepped[k] = (dynamic_cast<juce::AudioParameterChoice*> (rp) != nullptr || dynamic_cast<juce::AudioParameterBool*> (rp) != nullptr
+                           || id == "arp.root") ? 1 : 0;
+        const auto h = (uint32_t) id.hashCode();
+        morphFlipAt[k] = (id == "arp.root" || id == "arp.scale" || id == "prog.mode") ? 0.5f
+                                                                                       : 0.3f + 0.4f * (float) (h % 1000u) / 999.0f;
+    }
+    morphTimer = std::make_unique<MorphTimer> (*this);
     for (auto& c : chordNotes) c.store (0);
     for (auto& w : wanderHist) w.store (0);
     for (int i = 0; i < dw::TapeLoops::V; ++i) { loopPhase[(size_t) i].store (0.0f); loopEnv[(size_t) i].store (0.0f); loopNote[(size_t) i].store (60); loopRatio[(size_t) i].store (1.0f); }
@@ -1372,8 +1395,10 @@ juce::String DriftwerkProcessor::getModString() const
     for (size_t k = 0; k < paramList.size(); ++k)
     {
         const int src = mods[k]->source.load();
-        if (src >= 0 && src < NumOuts)
-            items.add (paramList[k]->getParameterID() + "<" + outDefs[src].id + "@" + juce::String (mods[k]->depth.load(), 3));
+        const char* id = src >= 0 && src < NumOuts ? outDefs[src].id
+                       : (src >= driftSource && src < driftSource + numDrifts ? driftId (src - driftSource) : nullptr);
+        if (id != nullptr)
+            items.add (paramList[k]->getParameterID() + "<" + id + "@" + juce::String (mods[k]->depth.load(), 3));
     }
     return items.joinIntoString (";");
 }
@@ -1387,7 +1412,9 @@ void DriftwerkProcessor::setModFromString (const juce::String& s)
     {
         const int pi = paramIndex (item.upToFirstOccurrenceOf ("<", false, false).trim());
         const auto rest = item.fromFirstOccurrenceOf ("<", false, false);
-        const int src = findOut (rest.upToFirstOccurrenceOf ("@", false, false).trim().toRawUTF8());
+        const auto srcId = rest.upToFirstOccurrenceOf ("@", false, false).trim();
+        int src = findOut (srcId.toRawUTF8());
+        for (int d = 0; d < numDrifts; ++d) if (srcId == driftId (d)) src = driftSource + d;
         const float depth = rest.fromFirstOccurrenceOf ("@", false, false).getFloatValue();
         if (pi >= 0 && src >= 0)
         {
@@ -1406,6 +1433,7 @@ DriftwerkProcessor::~DriftwerkProcessor()
     cancelPendingUpdate();
     stopRecording();
     cameraPoller = nullptr;
+    morphTimer = nullptr;
     camera.close();
 }
 
@@ -1780,6 +1808,23 @@ void DriftwerkProcessor::updateBlockParams()
         if (src >= 0 && src < NumOuts)
         {
             n = juce::jlimit (0.0f, 1.0f, n + mods[k]->depth.load (std::memory_order_relaxed) * outs[(size_t) src]);
+            mods[k]->now.store (n, std::memory_order_relaxed);
+        }
+        else if (src >= driftSource && src < driftSource + numDrifts)
+        {
+            // DRIFT: glides from one random point to the next (-1..1), a little irregularly.
+            auto& d = drifts[k];
+            static constexpr float periods[numDrifts] { 40.0f, 12.0f, 3.0f };
+            d.t += d.rate * (float) blockLen / (float) sr;
+            if (d.t >= 1.0f || d.rate <= 0.0f)
+            {
+                d.a = d.rate <= 0.0f ? 0.0f : d.b;
+                d.b = driftRng.next();
+                d.t = 0.0f;
+                d.rate = 1.0f / (periods[src - driftSource] * (0.6f + 0.8f * (driftRng.next() * 0.5f + 0.5f)));
+            }
+            const float sm = d.t * d.t * (3.0f - 2.0f * d.t);
+            n = juce::jlimit (0.0f, 1.0f, n + mods[k]->depth.load (std::memory_order_relaxed) * (d.a + (d.b - d.a) * sm));
             mods[k]->now.store (n, std::memory_order_relaxed);
         }
         effective[k] = rp->convertFrom0to1 (n);
@@ -3031,6 +3076,7 @@ void DriftwerkProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::M
     if (bpm <= 0.0) bpm = apvts.getRawParameterValue ("clk.bpm")->load();
     samplesPerBeat = sr * 60.0 / juce::jlimit (20.0, 400.0, bpm);
 
+    blockLen = juce::jmax (1, buffer.getNumSamples());
     updateBlockParams();
 
     // ---- Chord progression (changes exactly on bar lines, see applyProgression)
@@ -3237,7 +3283,9 @@ bool DriftwerkProcessor::loadUserPreset (const juce::File& f)
     if (xml == nullptr) return false;
     juce::MemoryBlock mb;
     copyXmlToBinary (*xml, mb);
+    loadingUserPreset = true;
     setStateInformation (mb.getData(), (int) mb.getSize());
+    loadingUserPreset = false;
     userPresetName = f.getFileNameWithoutExtension();
     updateHostDisplay (juce::AudioProcessor::ChangeDetails().withNonParameterStateChanged (true));
     return true;
@@ -3246,6 +3294,7 @@ bool DriftwerkProcessor::loadUserPreset (const juce::File& f)
 void DriftwerkProcessor::loadPreset (int index)
 {
     if (index < 0 || index >= getNumPresets()) return;
+    ++stateLoads;   // the morph carries on from the new preset (your A and B stay stored)
     currentProgram = index;
     userPresetName.clear();
     const auto& pr = presets()[(size_t) index];
@@ -3272,6 +3321,7 @@ void DriftwerkProcessor::loadPreset (int index)
     for (auto* param : getParameters())
         if (auto* rp = dynamic_cast<juce::RangedAudioParameter*> (param))
         {
+            if (rp->getParameterID() == "morph.time") continue;   // how long your morphs take stays as you set it
             const auto it = target.find (rp->getParameterID());
             const float v = it != target.end() ? it->second : rp->getDefaultValue();
             if (std::abs (rp->getValue() - v) < 1.0e-6f) continue;
@@ -3283,6 +3333,7 @@ void DriftwerkProcessor::loadPreset (int index)
     setPatchFromString (pr.patch != nullptr ? pr.patch : defaultPatch);
     setModFromString (pr.mods != nullptr ? pr.mods : "");
     if (juce::MessageManager::existsAndIsCurrentThread()) syncGrainSource();
+    ++stateLoads;
 }
 
 void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
@@ -3308,6 +3359,12 @@ void DriftwerkProcessor::getStateInformation (juce::MemoryBlock& destData)
         for (auto& sp : pulseSamplePath) ps.add (sp);
         if (ps.joinIntoString ("").isNotEmpty()) state.setProperty ("pulseSamples", ps.joinIntoString ("\n"), nullptr);
     }
+    for (int w = 0; w < 2; ++w)
+    {
+        const auto ms = getMorphString (w);
+        if (ms.isNotEmpty()) state.setProperty (w == 0 ? "morphA" : "morphB", ms, nullptr);
+        else state.removeProperty (w == 0 ? "morphA" : "morphB", nullptr);
+    }
     state.setProperty ("srcVersion", 2, nullptr);
     if (auto xml = state.createXml())
         copyXmlToBinary (*xml, destData);
@@ -3326,7 +3383,16 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
                 auto src = state.getChildWithProperty ("id", "grain.src");
                 if (src.isValid() && (int) src.getProperty ("value") == 8) src.setProperty ("value", (double) myFileSource, nullptr);
             }
+            ++stateLoads;
             apvts.replaceState (state);
+            // MORPH snapshots: a set always brings its own back; a preset of yours only when its
+            // morph is moving (so you can still load one, STORE A, load another and STORE B).
+            if (! loadingUserPreset || (int) std::lround (apvts.getRawParameterValue ("morph.move")->load()) != 0)
+                for (int w = 0; w < 2; ++w)
+                {
+                    const char* key = w == 0 ? "morphA" : "morphB";
+                    if (state.hasProperty (key)) setMorphFromString (w, state.getProperty (key).toString());
+                }
             setPatchFromString (state.getProperty ("patch", defaultPatch).toString());
             setModFromString (state.getProperty ("mods", {}).toString());
             const juce::String sp = state.getProperty ("sample", {}).toString();
@@ -3381,7 +3447,168 @@ void DriftwerkProcessor::setStateInformation (const void* data, int sizeInBytes)
                     if (juce::File::isAbsolutePath (line) && juce::File (line).exists()) paths.add (line);
                 loadWords (paths);
             }
+            ++stateLoads;
         }
+    }
+}
+
+//==============================================================================
+// MORPH: two snapshots of every knob and a glide between them.
+bool DriftwerkProcessor::morphSkips (const juce::String& id)
+{
+    return id.startsWith ("morph.") || id.startsWith ("cam.") || id == "clk.run" || id == "clk.bpm"
+        || id == "out.vol" || id == "play.on";
+}
+
+juce::String DriftwerkProcessor::morphTimeText (float seconds)
+{
+    const int t = juce::roundToInt (seconds);
+    if (t < 60) return juce::String (t) + " s";
+    return juce::String (t / 60) + ":" + juce::String (t % 60).paddedLeft ('0', 2) + " min";
+}
+
+bool DriftwerkProcessor::hasMorph (int which) const
+{
+    const juce::ScopedLock sl (morphLock);
+    return which >= 0 && which < 2 && morphSnap[which].size() == paramList.size();
+}
+
+void DriftwerkProcessor::storeMorph (int which)
+{
+    if (which < 0 || which > 1) return;
+    {
+        const juce::ScopedLock sl (morphLock);
+        auto& snap = morphSnap[which];
+        snap.resize (paramList.size());
+        for (size_t k = 0; k < paramList.size(); ++k) snap[k] = paramList[k]->getValue();
+    }
+    // You are at the one you just stored: the fader goes there, and no knob moves.
+    if (auto* mp = apvts.getParameter ("morph.pos"))
+    {
+        mp->beginChangeGesture();
+        mp->setValueNotifyingHost (which == 0 ? 0.0f : 1.0f);
+        mp->endChangeGesture();
+    }
+    ++stateLoads;
+}
+
+juce::String DriftwerkProcessor::getMorphString (int which) const
+{
+    const juce::ScopedLock sl (morphLock);
+    if (morphSnap[which].size() != paramList.size()) return {};
+    juce::StringArray items;
+    for (size_t k = 0; k < paramList.size(); ++k)
+        if (! morphSkip[k]) items.add (paramList[k]->getParameterID() + "=" + juce::String (morphSnap[which][k], 5));
+    return items.joinIntoString (";");
+}
+
+void DriftwerkProcessor::setMorphFromString (int which, const juce::String& s)
+{
+    const juce::ScopedLock sl (morphLock);
+    auto& snap = morphSnap[which];
+    if (s.isEmpty()) { snap.clear(); return; }
+    snap.resize (paramList.size());
+    for (size_t k = 0; k < paramList.size(); ++k) snap[k] = paramList[k]->getValue();   // knobs it doesn't know stay where they are
+    juce::StringArray items;
+    items.addTokens (s, ";", "");
+    for (const auto& it : items)
+    {
+        const int k = paramIndex (it.upToFirstOccurrenceOf ("=", false, false));
+        if (k >= 0) snap[(size_t) k] = juce::jlimit (0.0f, 1.0f, it.fromFirstOccurrenceOf ("=", false, false).getFloatValue());
+    }
+}
+
+void DriftwerkProcessor::morphTick (double seconds)
+{
+    const int kp = paramIndex ("morph.pos");
+    if (kp < 0) return;
+    auto* posParam = paramList[(size_t) kp];
+    // Work on a copy, so no lock is held while the host hears about the knobs.
+    bool ready;
+    {
+        const juce::ScopedLock sl (morphLock);
+        ready = morphSnap[0].size() == paramList.size() && morphSnap[1].size() == paramList.size();
+        if (ready) { morphWork[0] = morphSnap[0]; morphWork[1] = morphSnap[1]; }
+    }
+    float pos = posParam->getValue();
+    // With an LFO or drift on the A-B fader, the morph follows the moving value.
+    auto applied = [&] (float p)
+    {
+        return mods[(size_t) kp]->source.load() >= 0 ? juce::jlimit (0.0f, 1.0f, mods[(size_t) kp]->now.load()) : p;
+    };
+    const int move = (int) std::lround (apvts.getRawParameterValue ("morph.move")->load());
+    const int loads = stateLoads.load();
+    if (loads != morphLoadsSeen || ! ready)
+    {
+        // A preset or a set just loaded, or you stored A or B: carry on from here, change nothing.
+        morphLoadsSeen = loads;
+        morphLastPos = applied (pos);
+        morphWritten = pos;
+        morphWanderT = 1.0f;
+        morphLastMove = move;
+        return;
+    }
+
+    // Move the A-B fader.
+    const float len = juce::jmax (1.0f, apvts.getRawParameterValue ("morph.time")->load());
+    const bool youMovedIt = std::abs (pos - morphWritten) > 0.002f;   // by hand, or host automation
+    if (move != morphLastMove) { morphWanderT = 1.0f; morphLastMove = move; }
+    const float step = (float) seconds / len;
+    float np = pos;
+    switch (move)
+    {
+        case 1: np = juce::jmin (1.0f, pos + step); break;
+        case 2: np = juce::jmax (0.0f, pos - step); break;
+        case 3:
+            if (pos >= 1.0f) morphDir = -1;
+            else if (pos <= 0.0f) morphDir = 1;
+            np = juce::jlimit (0.0f, 1.0f, pos + (float) morphDir * step);
+            break;
+        case 4:
+        {
+            // WANDER: from one place between A and B to another, each glide as long as TIME
+            // makes it for that distance (give or take), easing in and out.
+            if (youMovedIt || morphWanderT >= 1.0f)
+            {
+                morphWanderFrom = pos;
+                float to = morphRng.next() * 0.5f + 0.5f;
+                for (int tries = 0; tries < 6 && std::abs (to - pos) < 0.25f; ++tries) to = morphRng.next() * 0.5f + 0.5f;
+                morphWanderTo = to;
+                morphWanderT = 0.0f;
+                morphWanderLen = juce::jmax (2.0f, len * std::abs (to - pos) * (0.7f + 0.6f * (morphRng.next() * 0.5f + 0.5f)));
+            }
+            morphWanderT = juce::jmin (1.0f, morphWanderT + (float) seconds / morphWanderLen);
+            const float e = morphWanderT * morphWanderT * (3.0f - 2.0f * morphWanderT);
+            np = morphWanderFrom + (morphWanderTo - morphWanderFrom) * e;
+            break;
+        }
+        default: break;
+    }
+    if (move != 0 && std::abs (np - pos) > 1.0e-7f)
+    {
+        posParam->setValueNotifyingHost (np);
+        pos = posParam->getValue();
+    }
+    morphWritten = pos;
+
+    // Turn the knobs to match. Floats and whole numbers glide; menus, switches and the key
+    // flip over at their own point between A and B.
+    const float a = applied (pos);
+    if (morphLastPos >= 0.0f && std::abs (a - morphLastPos) < 1.0e-6f) return;
+    morphLastPos = a;
+    const bool atEnd = a <= 0.0f || a >= 1.0f;
+    for (size_t k = 0; k < paramList.size(); ++k)
+    {
+        if (morphSkip[k]) continue;
+        const float va = morphWork[0][k], vb = morphWork[1][k];
+        if (va == vb) continue;
+        auto* rp = paramList[k];
+        float v;
+        if (morphStepped[k]) v = a >= morphFlipAt[k] ? vb : va;
+        else v = rp->convertTo0to1 (rp->getNormalisableRange().snapToLegalValue (rp->convertFrom0to1 (va + (vb - va) * a)));
+        const float tol = morphStepped[k] || atEnd ? 1.0e-6f : 0.0004f;
+        if (std::abs (v - rp->getValue()) <= tol) continue;
+        rp->setValueNotifyingHost (v);
     }
 }
 

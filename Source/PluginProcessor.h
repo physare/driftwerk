@@ -76,6 +76,10 @@ public:
 
     // Knob modulation: any parameter can follow a jack output (hand, motion, LFO...).
     struct ModSlot { std::atomic<int> source { -1 }; std::atomic<float> depth { 0.5f }; std::atomic<float> now { -1.0f }; };
+    // DRIFT: besides any jack output, a knob can wander on its own, slowly, medium or fast
+    // (its own smooth random line, so no two knobs move together).
+    static constexpr int driftSource = dw::NumOuts, numDrifts = 3;
+    static const char* driftId (int d) { return d == 0 ? "drift.slow" : (d == 1 ? "drift.medium" : "drift.fast"); }
     std::vector<std::unique_ptr<ModSlot>> mods;          // one per parameter, same order as paramList
     std::vector<juce::RangedAudioParameter*> paramList;
     int paramIndex (const juce::String& id) const;
@@ -83,6 +87,16 @@ public:
     void setModFromString (const juce::String& s);
 
     juce::AudioProcessorValueTreeState apvts;
+
+    // MORPH: two snapshots of every knob, fader and switch (A and B) and a glide between them.
+    // morph.pos says where you are (0 = A, 1 = B). The knobs really turn, on the message thread,
+    // so you see them move; floats and whole numbers glide, menus and switches flip part way.
+    void storeMorph (int which);                       // 0 = A, 1 = B: the knobs as they are now
+    bool hasMorph (int which) const;
+    void morphTick (double seconds);                   // run by a timer (and by the render tool)
+    static bool morphSkips (const juce::String& id);   // tempo, volume, camera and the morph itself stay put
+    std::atomic<int> stateLoads { 0 };                 // a preset or set loaded: the morph starts again from there
+    static juce::String morphTimeText (float seconds);
 
     // UI feedback (written by audio thread, read by the editor).
     std::array<std::atomic<float>, dw::NumOuts> monitor;
@@ -361,6 +375,10 @@ private:
     void updateBlockParams();
     std::unordered_map<std::string, int> paramIndexMap;
     std::vector<float> effective;
+    struct Drift { float a = 0.0f, b = 0.0f, t = 1.0f, rate = 0.0f; };
+    std::vector<Drift> drifts;                 // one per parameter
+    dw::Random driftRng { 0xD81F7u };
+    int blockLen = 512;
     float in (int jack, float normalled = 0.0f) const
     {
         const int src = patchCache[(size_t) jack];
@@ -451,6 +469,33 @@ private:
         void timerCallback() override;
     };
     std::unique_ptr<CameraPoller> cameraPoller;
+    // MORPH (the snapshots under morphLock; the rest belongs to morphTick, on the message thread)
+    juce::CriticalSection morphLock;
+    std::vector<float> morphSnap[2];                   // normalised values, same order as paramList (empty: not stored)
+    std::vector<float> morphWork[2];                   // morphTick's copy of them
+    std::vector<float> morphFlipAt;                    // where each menu / switch flips over from A to B
+    std::vector<char> morphStepped, morphSkip;
+    float morphLastPos = -1.0f, morphWritten = -1.0f;
+    int morphLoadsSeen = 0, morphDir = 1, morphLastMove = 0;
+    bool loadingUserPreset = false;     // a preset of yours keeps its A and B only if its morph is moving
+    float morphWanderFrom = 0.0f, morphWanderTo = 0.0f, morphWanderT = 1.0f, morphWanderLen = 1.0f;
+    dw::Random morphRng { 0x3A0F5u };
+    juce::String getMorphString (int which) const;
+    void setMorphFromString (int which, const juce::String& s);
+    struct MorphTimer : juce::Timer
+    {
+        DriftwerkProcessor& owner;
+        double last = 0.0;
+        explicit MorphTimer (DriftwerkProcessor& o) : owner (o) { startTimerHz (25); }
+        void timerCallback() override
+        {
+            const double now = juce::Time::getMillisecondCounterHiRes() * 0.001;
+            const double dt = last > 0.0 ? juce::jlimit (0.0, 0.5, now - last) : 0.04;
+            last = now;
+            owner.morphTick (dt);
+        }
+    };
+    std::unique_ptr<MorphTimer> morphTimer;
     // Ambient engine
     dw::DreamBank dream;
     dw::GrainCloud grains;

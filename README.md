@@ -106,13 +106,34 @@ The panel over the slime mold has eleven tabs:
 * **HARMONY** chooses which notes it can play. **PADS** (the default) uses only the notes of the Dream chord, so it always fits the pads. **SCALE** plays the whole SCALE. **ROOTS** plays only the root and fifth.
 * DENSITY sets how many steps play, MUTATE how often notes change, WALK how far they jump, and GATE how long each pluck lasts.
 
+## Knobs that move on their own
+
+Right-click any knob (or a LAYERS fader, or a knob on the performance tabs) to make it move by itself:
+
+* **LFO 1** or **LFO 2**: a steady sweep. Their speed and shape are on the LFO 1 and LFO 2 modules.
+* **Drift slowly**, **Drift** or **Drift fast**: the knob wanders on its own, gliding from one random place to the next (about a minute, ten seconds or a few seconds a move). Every knob drifts its own way, so two drifting knobs never move together.
+* **Other modulators**: S&H, ENV 2, the arp's random output or the bass gate.
+* **Your hand (camera)**: see below.
+
+The fader at the bottom of the menu sets how far it moves; below zero turns the knob the other way. A line shows the range the knob moves through and a bright dot shows where it is right now. Choose "Nothing" to go back to manual. Assignments are saved with your set and your presets.
+
+## MORPH: from one sound to another
+
+**MORPH** in the header opens two snapshots of every knob, fader, menu and switch:
+
+1. Set the knobs how you like them and press **STORE A**.
+2. Change them (or load another preset) and press **STORE B**.
+3. Slide the fader between A and B, or pick a **MOVE**: **A TO B**, **B TO A**, **BACK + FORTH** or **WANDER** (somewhere new between them every so often). **TIME** sets how long the trip from A to B takes, from 5 seconds to 10 minutes.
+
+The knobs really turn, so you can watch it happen and grab any knob on the way. Knobs glide; menus, switches and the key flip over part way, each at its own point, so a scene changes over a while instead of all at once. Tempo, volume, the camera, the cables and the patterns (the sequence and the drums) stay as they are. A small line under MORPH shows where you are between A and B.
+
+A and B stay stored when you change presets, so you can morph from one preset to another. They are saved with your set. A preset of yours saved while the morph is moving keeps its A and B and starts moving again when you load it. The A-B fader is a knob like any other, so it can be automated in Ableton, or right-clicked for an LFO or drift.
+
 ## Playing knobs with your hands
 
-Right-click any knob and pick Hand X, Hand Y or Hand motion (or an LFO, S&H, ENV 2 or the arp's random output),
-then pick a depth. Negative depths turn the knob the other way. An amber arc shows the range the knob can move
-through and a bright dot shows where it is right now. Choose "Nothing" to go back to manual.
+Right-click any knob and pick Hand X, Hand Y or Hand motion (in "Your hand (camera)"), then set the depth.
 The CLOCK module's TUNE knob shifts the pitch of everything, so assigning it to Hand Y lets you bend the whole
-system up and down. Hand control needs CAM ON in the camera module. Assignments are saved with your set.
+system up and down. Hand control needs CAM ON in the camera module.
 
 ## Presets
 

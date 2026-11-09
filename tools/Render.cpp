@@ -45,6 +45,36 @@ int main (int argc, char** argv)
                 rp->setValueNotifyingHost (rp->convertTo0to1 (item.fromFirstOccurrenceOf ("=", false, false).getFloatValue()));
         proc.syncGrainSource();   // no message loop runs here, so pick up grain.src directly
     }
+    // MORPH: "preset:move:time": A = the program, B = that preset, then glide (move 1 A TO B,
+    // 2 B TO A, 3 BACK + FORTH, 4 WANDER) over time seconds, starting from A.
+    juce::StringArray morphShow;
+    const bool morphing = std::getenv ("DW_MORPH") != nullptr;
+    if (morphing)
+    {
+        juce::StringArray f; f.addTokens (std::getenv ("DW_MORPH"), ":", "");
+        proc.storeMorph (0);
+        std::vector<float> a;
+        for (auto* rp : proc.paramList) a.push_back (rp->getValue());
+        proc.loadPreset (f[0].getIntValue());
+        proc.storeMorph (1);
+        for (size_t k = 0; k < proc.paramList.size(); ++k)
+            if (std::abs (proc.paramList[k]->getValue() - a[k]) > 1.0e-6f && ! DriftwerkProcessor::morphSkips (proc.paramList[k]->getParameterID()))
+                morphShow.add (proc.paramList[k]->getParameterID());
+        std::printf ("morph: %d knobs differ\n", morphShow.size());
+        proc.morphTick (0.0);
+        proc.apvts.getParameter ("morph.pos")->setValueNotifyingHost (0.0f);
+        proc.morphTick (0.0);   // back to A
+        auto* mv = proc.apvts.getParameter ("morph.move");
+        mv->setValueNotifyingHost (mv->convertTo0to1 ((float) f[1].getIntValue()));
+        auto* mt = proc.apvts.getParameter ("morph.time");
+        mt->setValueNotifyingHost (mt->convertTo0to1 (f[2].getFloatValue()));
+        proc.syncGrainSource();
+    }
+    if (auto* env = std::getenv ("DW_MOD"))   // knob modulation, as in presets: "drn.level<drift.fast@0.5;..."
+    {
+        proc.setModFromString (proc.getModString() + ";" + juce::String (env));
+        std::printf ("mods: %s\n", proc.getModString().toRawUTF8());
+    }
     if (auto* env = std::getenv ("DW_BREAK"))   // BREAK: load a drum loop
     {
         const bool ok = proc.loadBreak (juce::File (env));
@@ -113,6 +143,20 @@ int main (int argc, char** argv)
                          proc.userPresetName.toRawUTF8(), (int) proc.apvts.getRawParameterValue ("pulse.kit")->load());
             DriftwerkProcessor::userPresetFolder().getChildFile ("Render Test.timewind").deleteFile();
         }
+        if (a.contains ("morph"))   // MORPH: A and B come back with a set, and with a preset of yours only while moving
+        {
+            juce::MemoryBlock mb;
+            proc.getStateInformation (mb);
+            DriftwerkProcessor p2;
+            p2.setStateInformation (mb.getData(), (int) mb.getSize());
+            const int move = (int) proc.apvts.getRawParameterValue ("morph.move")->load();
+            proc.saveUserPreset ("Render Morph");
+            DriftwerkProcessor p3;
+            p3.loadUserPreset (DriftwerkProcessor::userPresetFolder().getChildFile ("Render Morph.timewind"));
+            std::printf ("morph state: A %d B %d  set copy: A %d B %d  my preset (move %d): A %d B %d\n", (int) proc.hasMorph (0), (int) proc.hasMorph (1),
+                         (int) p2.hasMorph (0), (int) p2.hasMorph (1), move, (int) p3.hasMorph (0), (int) p3.hasMorph (1));
+            DriftwerkProcessor::userPresetFolder().getChildFile ("Render Morph.timewind").deleteFile();
+        }
         std::printf ("after %s: mode %d, %d chords\n", env, (int) proc.apvts.getRawParameterValue ("prog.mode")->load(),
                      (int) proc.apvts.getRawParameterValue ("prog.len")->load() + 2);
     }
@@ -138,6 +182,17 @@ int main (int argc, char** argv)
     {
         organismClock += block / sr;
         while (organismClock >= 1.0 / 30.0) { organismClock -= 1.0 / 30.0; if (proc.organism.manual) proc.organism.tick(); }
+        if (morphing)
+        {
+            proc.morphTick (block / sr);
+            if (pos % (int) (sr * 5) < block)
+            {
+                juce::String line;
+                for (int i = 0; i < juce::jmin (6, morphShow.size()); ++i)
+                    line << morphShow[i] << " " << proc.apvts.getParameter (morphShow[i])->getCurrentValueAsText() << "  ";
+                std::printf ("  %5.1fs  pos %.3f  %s\n", pos / sr, proc.apvts.getRawParameterValue ("morph.pos")->load(), line.toRawUTF8());
+            }
+        }
         buf.clear();
         proc.processBlock (buf, midi);
         if (trace)
@@ -220,6 +275,7 @@ int main (int argc, char** argv)
             de->view.advanceSlime (600);
             if (std::getenv ("DW_FULL")) de->view.showFullCamera();
             if (auto* t = std::getenv ("DW_TAB")) de->view.showPerformTab (juce::String (t).getIntValue());
+            if (std::getenv ("DW_MORPHUI")) de->view.showMorph (true);
             de->refreshNow();
         }
         ed->setSize (MainView::designW, MainView::designH);
