@@ -58,6 +58,8 @@ juce_add_plugin(Timewind
     PLUGIN_MANUFACTURER_CODE Drfw
     PLUGIN_CODE Dw94
     VST3_CATEGORIES Instrument Synth
+    ICON_BIG "${CMAKE_CURRENT_SOURCE_DIR}/Resources/timewind-icon.png"
+    ICON_SMALL "${CMAKE_CURRENT_SOURCE_DIR}/Resources/timewind-icon.png"
     FORMATS VST3 Standalone
     PRODUCT_NAME "Timewind")
 

@@ -69,6 +69,8 @@ try {
     if (Test-Path $self) { Copy-Item -Force $self (Join-Path $home_ 'update-timewind.ps1') }
     [IO.File]::WriteAllText($current, $remote)   # (Set-Content with -NoNewline and positional arguments misfires on Windows PowerShell 5.1)
     Remove-Item -Recurse -Force $tmp
+    # Windows caches icons, so the Desktop shortcut can keep showing the old picture after the app's icon changes.
+    try { Start-Process -FilePath "$env:SystemRoot\System32\ie4uinit.exe" -ArgumentList '-show' -WindowStyle Hidden -ErrorAction Stop } catch { }
     Log ("Updated to $remote" + $(if ($appOpen) { ' (the Timewind app was open: close and reopen it to use the new version)' } else { '' }))
     Make-Shortcuts
 } catch {
